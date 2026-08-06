@@ -1,0 +1,54 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "GenHub",
+  "version": "0.1.6",
+  "identifier": "com.genhub.app",
+  "build": {
+    "frontendDist": "./dist",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": ["../skills.json"],
+    "icon": [
+      "icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      },
+      "nsis": {
+        "installMode": "both",
+        "languages": [
+          "SimpChinese"
+        ],
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "customLanguageFiles": {
+          "SimpChinese": "nsis/custom-lang.nsh"
+        },
+        "installerHooks": "nsis/installer-hooks.nsh"
+      }
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "GenHub",
+        "width": 1100,
+        "height": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "visible": true,
+        "devtools": false,
+        "backgroundColor": "#0a0a0f"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

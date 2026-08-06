@@ -1,0 +1,15 @@
+const fs = require('fs');
+const c = fs.readFileSync('D:/codexhubcn/cc-switch-clone/src/components/ChatMain.tsx', 'utf8');
+console.log('1.CronIntent import:', c.includes("from './CronIntent'"));
+console.log('2.overrideText:', c.includes('overrideText'));
+console.log('3.cron_trigger:', c.includes('cron_trigger'));
+console.log('4.handleSend override:', c.includes('overrideText ??'));
+console.log('5.messagesEndRef:', c.includes('messagesEndRef'));
+console.log('6.scrollIntoView:', c.includes('scrollIntoView'));
+console.log('7.Mode A intercept:', c.includes('模式 A'));
+console.log('8.Mode B intercept:', c.includes('模式 B'));
+console.log('9.CronIntent file exists:', fs.existsSync('D:/codexhubcn/cc-switch-clone/src/components/CronIntent.ts'));
+console.log('10.File size:', c.length);
+console.log('11.handleSend context (first 200):');
+const hs = c.indexOf('const handleSend = async');
+console.log(c.substring(hs, hs + 200));

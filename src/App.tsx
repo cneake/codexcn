@@ -1,0 +1,3057 @@
+﻿import React from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+
+/* ── 模型下拉组件（支持可用性 emoji+颜色）── */
+function ModelDropdown({
+  value, options, onChange, isApiKeyLike, getModelInfo, loading, onRefresh, providerId
+}: {
+  value: string; options: {id:string; name?:string; function_calling:boolean|null}[];
+  onChange: (id:string)=>void; isApiKeyLike: (s:string|null|undefined)=>boolean;
+  getModelInfo: (id:string)=>{label:string;emoji:string;available:boolean};
+  loading: boolean; onRefresh: ()=>void; providerId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const sel = options.find(o => o.id === value);
+  const info = sel ? getModelInfo(sel.id) : null;
+
+  const list = options.filter(o => !isApiKeyLike(o.id));
+
+  return (
+    <div style={{display:'flex',gap:6,alignItems:'center',position:'relative',flex:1}}>
+      <div ref={ref} style={{flex:1,position:'relative'}} onClick={() => setOpen(v => !v)}>
+        <div style={{
+          ...({fontSize:12,padding:'6px 10px',background:'var(--bg)',border:'1px solid var(--border)',
+              borderRadius:6,color:info && !info.available ? 'var(--text3)' : 'var(--text)',
+              cursor:'pointer',display:'flex',alignItems:'center',gap:6,overflow:'hidden'}),
+        }}>
+          <span style={{fontSize:13,flexShrink:0,
+            color: !info ? '#888' : !info.available ? '#888' : info.emoji==='✅'?'#4ade80':'#facc15'
+          }}>{info?.emoji || ''}</span>
+          <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+            color:info && !info.available ? 'var(--text3)' : undefined
+          }}>
+            {sel ? ((sel.name||sel.id) + (info?.label ? ` (${info.label})` : '')) : '-- 选择模型 --'}
+          </span>
+          <span style={{color:'var(--text3)',fontSize:10,flexShrink:0}}>{open?'▲':'▼'}</span>
+        </div>
+        {open && (
+          <div style={{
+            position:'absolute',top:'100%',left:0,right:0,zIndex:9999,
+            background:'var(--bg)',border:'1px solid var(--border)',borderRadius:6,
+            maxHeight:280,overflowY:'auto',marginTop:4,
+            boxShadow:'0 8px 24px rgba(0,0,0,0.4)',
+          }}>
+            {list.length===0 && <div style={{padding:'12px 14px',color:'var(--text3)',fontSize:12}}>暂无模型，请先点「刷新」</div>}
+            {list.map(opt => {
+              const i = getModelInfo(opt.id);
+              const isSel = opt.id === value;
+              return (
+                <div key={opt.id}
+                  onClick={() => { onChange(opt.id); setOpen(false); }}
+                  style={{
+                    padding:'7px 14px',cursor:'pointer',fontSize:12,
+                    display:'flex',alignItems:'center',gap:6,
+                    color: i.available ? 'var(--text)' : 'var(--text3)',
+                    background: isSel ? 'var(--card-hover)' : 'transparent',
+                    textDecoration: i.available ? 'none' : 'line-through',
+                  }}
+                  onMouseEnter={e => { if(!isSel) (e.target as HTMLDivElement).style.background='var(--card-hover)'; }}
+                  onMouseLeave={e => { if(!isSel) (e.target as HTMLDivElement).style.background='transparent'; }}
+                >
+                  <span style={{fontSize:13,flexShrink:0,
+                    color: !i.available?'#888':i.emoji==='✅'?'#4ade80':'#facc15'
+                  }}>{i.emoji}</span>
+                  <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                    color:i.available?undefined:'var(--text3)'
+                  }}>
+                    {opt.name||opt.id}{i.label&&opt.name?` (${i.label})`:''}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <button style={{fontSize:11,padding:'4px 8px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,color:'var(--accent)',cursor:'pointer',flexShrink:0}}
+        onClick={e => { e.stopPropagation(); onRefresh(); }}
+        disabled={loading}
+      >
+        {loading?'加载中':'刷新'}
+      </button>
+    </div>
+  );
+}
+import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { createPortal } from 'react-dom';
+import donateWechatImg from './assets/donate-wechat.jpg';
+import donateAlipayImg from './assets/donate-alipay.jpg';
+import Terminal from './components/Terminal';
+import TerminalManager from './components/TerminalManager';
+import SkillsPanel from './components/SkillsPanel';
+import BundledSkillsPanel from './components/BundledSkillsPanel';
+import ChatSidebar from './components/ChatSidebar';
+import ChatMain from './components/ChatMain';
+import MemoryPanel from './components/MemoryPanel';
+import SandboxPanel from './components/SandboxPanel';
+import AgentManager from './components/AgentManager';
+import CronPanel from './components/CronPanel';
+import OrchestratorPanel from './components/OrchestratorPanel';
+import RiskNoticeModal from './components/RiskNoticeModal';
+import SkillOverlay from './components/SkillOverlay';
+import './i18n';
+import './App.css';
+
+/* ── 环境检测页兜底：这5个工具永远显示安装按钮 ── */
+const MISSING_TOOLS_CONFIG = [
+  { id: 'claude-desktop', name: 'Claude Desktop', type: 'download' as const, url: 'https://claude.com/download' },
+  { id: 'codex', name: 'Codex', type: 'npm' as const, pkg: '@openai/codex' },
+  { id: 'gemini-cli', name: 'Gemini CLI', type: 'npm' as const, pkg: '@google/gemini-cli' },
+  { id: 'opencode', name: 'OpenCode', type: 'npm' as const, pkg: 'opencode-ai' },
+  { id: 'qoder-cli', name: 'Qoder CLI', type: 'npm' as const, pkg: '@qoder-ai/qodercli' },
+];
+
+/* ── 工具 Logo（顶部工具栏用，带白色圆角边框）── */
+const TOOL_LOGOS: Record<string, React.ReactElement> = {
+  'claude-code': <img src="/icons/claude-code.png" alt="Claude Code" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'claude-desktop': <img src="/icons/claude-desktop.png" alt="Claude Desktop" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'codex':       <img src="/icons/codex.png" alt="Codex" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'gemini-cli':  <img src="/icons/gemini-cli.png" alt="Gemini CLI" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'opencode':    <img src="/icons/opencode.png" alt="OpenCode" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'deepseek-cli': <img src="/icons/deepseek-cli.png" alt="DeepSeek CLI" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'openclaw':    <img src="/icons/openclaw.png" alt="OpenClaw" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'hermes-agent':<img src="/icons/hermes.png" alt="Hermes Agent" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'qoder-cli':   <img src="/icons/qoder.png" alt="Qoder CLI" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+  'grok-build':  <img src="/icons/grok-build.png" alt="Grok Build" width="24" height="24" style={{borderRadius: 6, background: '#fff', padding: 2}} />,
+};
+
+/* ── Provider Logo(厂商真实图标) ── */
+const PROVIDER_LOGOS: Record<string, React.ReactElement> = {
+  // 统一中转（推荐）
+  'eake-api':   <div style={{width:20,height:20,borderRadius:4,background:'linear-gradient(135deg,#00f0ff,#a855f7)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:12,fontWeight:'bold'}}>E</div>,
+  // 国内厂商
+  deepseek:    <img src="/logos/deepseek.svg" alt="DeepSeek" width="20" height="20" style={{borderRadius:4}} />,
+  zhipu:       <img src="/logos/zhipu.svg" alt="智谱GLM" width="20" height="20" style={{borderRadius:4}} />,
+  minimax:     <img src="/logos/minimax.svg" alt="MiniMax" width="20" height="20" style={{borderRadius:4}} />,
+  kimi:        <img src="/logos/kimi.svg" alt="Kimi" width="20" height="20" style={{borderRadius:4}} />,
+  bytedance:   <img src="/logos/doubao.svg" alt="火山引擎" width="20" height="20" style={{borderRadius:4}} />,
+  siliconflow: <img src="/logos/siliconflow.svg" alt="硅基流动" width="20" height="20" style={{borderRadius:4}} />,
+  qwen:        <img src="/logos/qwen.svg" alt="通义千问" width="20" height="20" style={{borderRadius:4}} />,
+  wenxin:      <img src="/logos/wenxin.svg" alt="文心一言" width="20" height="20" style={{borderRadius:4}} />,
+  hunyuan:     <img src="/logos/tencent.svg" alt="混元" width="20" height="20" style={{borderRadius:4}} />,
+  stepfun:     <img src="/logos/stepfun.svg" alt="阶跃星辰" width="20" height="20" style={{borderRadius:4}} />,
+  baidu:       <img src="/logos/baidu.svg" alt="百度千帆" width="20" height="20" style={{borderRadius:4}} />,
+  // 海外厂商
+  openai:      <img src="/logos/openai.svg" alt="OpenAI" width="20" height="20" style={{borderRadius:4}} />,
+  anthropic:   <img src="/logos/anthropic.svg" alt="Anthropic" width="20" height="20" style={{borderRadius:4}} />,
+  google:      <img src="/logos/google.svg" alt="Google" width="20" height="20" style={{borderRadius:4}} />,
+  mistral:     <img src="/logos/mistral.svg" alt="Mistral AI" width="20" height="20" style={{borderRadius:4}} />,
+  groq:        <img src="/logos/nvidia.svg" alt="Groq" width="20" height="20" style={{borderRadius:4}} />,
+  cohere:      <img src="/logos/cohere.svg" alt="Cohere" width="20" height="20" style={{borderRadius:4}} />,
+  openrouter:  <img src="/logos/openrouter.svg" alt="OpenRouter" width="20" height="20" style={{borderRadius:4}} />,
+  ollama:      <img src="/logos/ollama.svg" alt="Ollama" width="20" height="20" style={{borderRadius:4}} />,
+};
+
+/* ── 厂商配色(用于 Provider 卡片顶部色条)── */
+const PROVIDER_BRAND: Record<string, { bg: string; fg: string }> = {
+  // 统一中转（推荐）
+  'eake-api': { bg: 'linear-gradient(135deg, #00f0ff, #a855f7)', fg: '#ffffff' },
+  // 国内厂商
+  deepseek:   { bg: '#4B5BD6', fg: '#ffffff' },
+  'zhipu-glm': { bg: '#7B3FE4', fg: '#ffffff' },
+  minimax:    { bg: '#FF6B35', fg: '#ffffff' },
+  kimi:       { bg: '#FF2D55', fg: '#ffffff' },
+  huoshan:    { bg: '#FF4D4D', fg: '#ffffff' },
+  siliconflow:{ bg: '#6366F1', fg: '#ffffff' },
+  doubao:     { bg: '#FF9500', fg: '#ffffff' },
+  chatglm:    { bg: '#6B3FE4', fg: '#ffffff' },
+  qwen:       { bg: '#FF6B9D', fg: '#ffffff' },
+  wenxin:     { bg: '#00C853', fg: '#ffffff' },
+  hunyuan:    { bg: '#FF5722', fg: '#ffffff' },
+  baidu:      { bg: '#2932E1', fg: '#ffffff' },
+  stepfun:    { bg: '#00BFFF', fg: '#ffffff' },
+  // 海外厂商
+  openai:     { bg: '#10A37F', fg: '#ffffff' },
+  anthropic:  { bg: '#CC785C', fg: '#ffffff' },
+  google:     { bg: '#4285F4', fg: '#ffffff' },
+  cohere:     { bg: '#E53A00', fg: '#ffffff' },
+  mistral:    { bg: '#FF6B35', fg: '#ffffff' },
+  ollama:     { bg: '#FFFFFF', fg: '#000000' },
+  openrouter: { bg: '#33C6F4', fg: '#ffffff' },
+  groq:       { bg: '#E53A00', fg: '#ffffff' },
+};
+
+/* ── MCP 预设模板 ── */
+const MCP_PRESETS = [
+  // ━━━ 官方参考实现（7 个）━━━
+  { id:'everything', name:'Everything', category:'测试', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-everything"]', desc:'官方测试服务器，包含 prompts/resources/tools 示例' },
+  { id:'fetch', name:'Fetch', category:'网络', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-fetch"]', desc:'抓取网页内容并转换为 LLM 友好格式' },
+  { id:'filesystem', name:'Filesystem', category:'本地', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-filesystem","C:\\Users\\Administrator\\Documents"]', desc:'文件系统操作（读/写/搜索）' },
+  { id:'git', name:'Git', category:'开发', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-git"]', desc:'Git 仓库读取、搜索、操作' },
+  { id:'memory', name:'Memory', category:'记忆', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-memory"]', desc:'知识图谱持久化记忆系统' },
+  { id:'sequentialthinking', name:'Sequential Thinking', category:'推理', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-sequential-thinking"]', desc:'动态反思式问题求解' },
+  { id:'time', name:'Time', category:'工具', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-time"]', desc:'时区和时间转换' },
+
+  // ━━━ 归档但常用（5 个）━━━
+  { id:'brave-search', name:'Brave Search', category:'搜索', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-brave-search"]', env:'{"BRAVE_API_KEY":"xxx"}', desc:'Brave 搜索 API（需申请 Key）' },
+  { id:'github', name:'GitHub', category:'开发', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-github"]', env:'{"GITHUB_TOKEN":"xxx"}', desc:'GitHub API：仓库管理、PR、Issues（需 Token）' },
+  { id:'postgres', name:'PostgreSQL', category:'数据库', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-postgres","postgresql://user:pass@localhost/db"]', desc:'PostgreSQL 只读访问 + Schema 检查' },
+  { id:'puppeteer', name:'Puppeteer', category:'浏览器', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-puppeteer"]', desc:'浏览器自动化和网页抓取' },
+  { id:'sqlite', name:'SQLite', category:'数据库', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-sqlite","/tmp/test.db"]', desc:'SQLite 数据库交互' },
+
+  // ━━━ 社区精选 - 聚合器（3 个）━━━
+  { id:'1mcp-agent', name:'1mcp Agent', category:'聚合', transport:'stdio', command:'npx', args:'["-y","1mcp-agent"]', desc:'聚合多个 MCP server 到一个接口' },
+  { id:'a2asearch', name:'A2A Search', category:'发现', transport:'stdio', command:'npx', args:'["-y","a2asearch-mcp"]', desc:'搜索 4800+ MCP servers / agents / skills' },
+  { id:'forage', name:'Forage', category:'发现', transport:'stdio', command:'npx', args:'["-y","@isaac-levine/forage"]', desc:'自动发现并安装 MCP servers' },
+
+  // ━━━ 社区精选 - 本地工具（3 个）━━━
+  { id:'depwire', name:'Depwire', category:'开发', transport:'stdio', command:'npx', args:'["-y","depwire"]', desc:'依赖图分析 + 15 个 AI 编码工具' },
+  { id:'cortex', name:'Cortex', category:'知识', transport:'stdio', command:'npx', args:'["-y","@gzoonet/cortex"]', desc:'本地知识图谱（监控项目文件）' },
+  { id:'proposalcraft', name:'ProposalCraft', category:'办公', transport:'stdio', command:'npx', args:'["-y","github:jabbawocky/proposalcraft"]', desc:'根据历史提案自动生成新提案草稿' },
+
+  // ━━━ 社区精选 - 云端 API（4 个）━━━
+  { id:'deepseek', name:'DeepSeek', category:'LLM', transport:'stdio', command:'npx', args:'["-y","@arikusi/deepseek-mcp-server"]', env:'{"DEEPSEEK_API_KEY":"xxx"}', desc:'DeepSeek 模型接口' },
+  { id:'ollama-bridge', name:'Ollama Bridge', category:'LLM', transport:'stdio', command:'npx', args:'["-y","@jaspertvdm/mcp-server-ollama-bridge"]', desc:'本地 Ollama 模型桥接（Llama/Mistral/Qwen）' },
+  { id:'openai-bridge', name:'OpenAI Bridge', category:'LLM', transport:'stdio', command:'npx', args:'["-y","@jaspertvdm/mcp-server-openai-bridge"]', env:'{"OPENAI_API_KEY":"xxx"}', desc:'GPT-4/GPT-4o 桥接' },
+  { id:'gemini-bridge', name:'Gemini Bridge', category:'LLM', transport:'stdio', command:'npx', args:'["-y","@jaspertvdm/mcp-server-gemini-bridge"]', env:'{"GOOGLE_API_KEY":"xxx"}', desc:'Google Gemini 模型桥接' },
+
+  // ━━━ 社区精选 - 其他（5 个）━━━
+  { id:'exa', name:'Exa Search', category:'搜索', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-exa"]', env:'{"EXA_API_KEY":"xxx"}', desc:'AI 原生搜索引擎' },
+  { id:'slack', name:'Slack', category:'通讯', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-slack"]', env:'{"SLACK_BOT_TOKEN":"xxx","SLACK_TEAM_ID":"xxx"}', desc:'Slack 频道管理和消息' },
+  { id:'google-drive', name:'Google Drive', category:'云盘', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-gdrive"]', desc:'Google Drive 文件访问和搜索' },
+  { id:'redis', name:'Redis', category:'数据库', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-redis","redis://localhost:6379"]', desc:'Redis 键值存储交互' },
+  { id:'context7', name:'Context7', category:'记忆', transport:'stdio', command:'npx', args:'["-y","@modelcontextprotocol/server-context7"]', desc:'上下文记忆管理' },
+];
+
+interface Provider {
+  id: string; name: string; base_url: string;
+  api_key: string | null; icon: string;
+  category: string; enabled: boolean; sort_order: number;
+}
+interface CliTool {
+  id: string; name: string; config_type: string;
+  config_path: string; active_provider_id: string | null;
+  enabled: boolean; description: string;
+}
+interface ModelCapability {
+  id: string;
+  name?: string;
+  function_calling: boolean | null;
+  context_window?: number;
+  input_modalities?: string[];
+  output_modalities?: string[];
+}
+interface ToolDetectResult {
+  tool_id: string; tool_name: string; icon: string;
+  installed: boolean; config_dir: string; command: string;
+}
+
+
+/* ── 版本号比较(逐段数字比较,返回正数表示 v1 > v2)── */
+const compareVersions = (a: string, b: string): number => {
+  const na = (a || '').replace(/^v/i,'').split('.').map(Number);
+  const nb = (b || '').replace(/^v/i,'').split('.').map(Number);
+  for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+    const xa = na[i] || 0;
+    const xb = nb[i] || 0;
+    if (xa !== xb) return xa - xb;
+  }
+  return 0;
+};
+
+function App() {
+  // 子窗口模式：仅渲染技能调用浮窗（独立可拖出窗口），不加载主界面
+  const isOverlayWindow = new URLSearchParams(window.location.search).get('window') === 'skill-overlay';
+  if (isOverlayWindow) {
+    return <SkillOverlay onClose={() => { getCurrentWindow().close().catch(() => {}); }} />;
+  }
+  const [phase, setPhase] = useState<'splash' | 'welcome' | 'detecting' | 'main'>('splash');
+  const [splashProgress, setSplashProgress] = useState(0);
+
+  /* ── Splash 进度条动画 + 加载提示 ── */
+  const splashTips = [
+    '🔧 正在加载工具配置...',
+    '⚡ 正在连接模型服务...',
+    '📦 正在初始化技能系统...',
+    '🛡️ 正在检查安全策略...',
+    '🚀 正在准备就绪...',
+  ];
+  const [splashTip, setSplashTip] = useState(0);
+  const [splashDone, setSplashDone] = useState(false); // splash 动画完成
+  const [dataReady, setDataReady] = useState(false);  // 数据加载完成
+  const [pendingPhase, setPendingPhase] = useState<'welcome' | 'main'>('main'); // 数据就绪后要去的阶段
+
+  // 强制设置 body 背景色，防止白屏
+  useEffect(() => {
+    document.body.style.background = '#0a0a0f';
+    document.documentElement.style.background = '#0a0a0f';
+  }, []);
+
+  useEffect(() => {
+    if (phase === 'splash') {
+      const duration = 7000; // 7秒
+      // 进度条：匀速推进
+      const interval = setInterval(() => {
+        setSplashProgress(prev => {
+          if (prev >= 100) { clearInterval(interval); return 100; }
+          return prev + Math.ceil(100 / (duration / 50));
+        });
+      }, 50);
+      // 提示文字轮播
+      const tipInterval = setInterval(() => {
+        setSplashTip(prev => (prev + 1) % splashTips.length);
+      }, 700);
+      const timer = setTimeout(() => {
+        clearInterval(interval);
+        clearInterval(tipInterval);
+        setSplashDone(true); // 标记 splash 动画完成
+      }, duration);
+      return () => { clearInterval(interval); clearInterval(tipInterval); clearTimeout(timer); };
+    } else {
+      setSplashProgress(0);
+    }
+  }, [phase]);
+
+  // splash 动画完成 + 数据就绪 → 切换阶段
+  useEffect(() => {
+    if (splashDone && dataReady) {
+      setPhase(pendingPhase);
+    }
+  }, [splashDone, dataReady, pendingPhase]);
+  const [detectResults, setDetectResults] = useState<ToolDetectResult[]>([]);
+  const [tools, setTools] = useState<CliTool[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [activeTool, setActiveTool] = useState(() => {
+    // 从 localStorage 读取上次选择的工具，默认 claude-code
+    try {
+      const saved = localStorage.getItem('genhub-active-tool');
+      return saved || 'claude-code';
+    } catch {
+      return 'claude-code';
+    }
+  });
+  const [installed, setInstalled] = useState<string[]>([]);
+  const [detectProgress, setDetectProgress] = useState<{ current: number; total: number; toolName: string }>({ current: 0, total: 6, toolName: '' });
+  const [detectDone, setDetectDone] = useState(false);
+  const [installingTool, setInstallingTool] = useState<string | null>(null);
+  // DEBUG: phase/activeTool 跟踪
+  useEffect(() => {
+    const saved = (() => { try { return localStorage.getItem('genhub-active-tool'); } catch { return null; } })();
+    console.log('[GenHub DEBUG] phase=', phase, 'activeTool=', activeTool, 'localStorage=', saved);
+  }, [phase, activeTool]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutTab, setAboutTab] = useState<'project' | 'disclaimer'>('project');
+  const [riskNoticeOpen, setRiskNoticeOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [donateOpen, setDonateOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cacheCleanOpen, setCacheCleanOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [dataOpen, setDataOpen] = useState(false);
+  const [installToolsOpen, setInstallToolsOpen] = useState(false); // 已废弃：环境安装已合并到 Agent 管理
+  const [dotGuideOpen, setDotGuideOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpServers, setMcpServers] = useState<any[]>([]);
+  const [mcpEditing, setMcpEditing] = useState<any>(null);
+  const [mcpFeedback, setMcpFeedback] = useState<{msg:string, ok:boolean}|null>(null);
+  const [mcpTab, setMcpTab] = useState<'presets' | 'discover'>('presets');
+  const [mcpSearch, setMcpSearch] = useState('');
+  const [mcpDiscoverResults, setMcpDiscoverResults] = useState<any[]>([]);
+  const [mcpDiscoverLoading, setMcpDiscoverLoading] = useState(false);
+  const [mcpDiscoverPage, setMcpDiscoverPage] = useState(1);
+  const [keyFor, setKeyFor] = useState<string | null>(null);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [newP, setNewP] = useState({ id: '', name: '', base_url: '', icon: '🟢', category: 'domestic' });
+  const [keyVal, setKeyVal] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [showQcKeys, setShowQcKeys] = useState<Record<string, boolean>>({});
+
+  // API Key 弹窗打开时重置遮蔽状态
+  useEffect(() => { if (keyFor) setShowKey(false); }, [keyFor]);
+  const [hideInstallBanner, setHideInstallBanner] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloadToolId, setDownloadToolId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [latestVersion, setLatestVersion] = useState<string>('');
+  const [currentVersion, setCurrentVersion] = useState('');
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState<{ progress: number; downloaded: number; total: number; status?: string; error?: string } | null>(null);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
+  const [bundledSkillsOpen, setBundledSkillsOpen] = useState(false);
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [providerModalOpen, setProviderModalOpen] = useState(false);
+  const [quickConfigOpen, setQuickConfigOpen] = useState(false);
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
+
+  /* ── 用户登录状态 ── */
+  const [user, setUser] = useState<{ id: number; name: string; avatar_url?: string } | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginTab, setLoginTab] = useState<'login'|'register'>('login');
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [registerForm, setRegisterForm] = useState({ username: '', email: '', password: '' });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [userProfileOpen, setUserProfileOpen] = useState(false);
+
+  /* ── 一键配置：每个 Provider 的编辑状态 ── */
+  const [qcProviders, setQcProviders] = useState<Provider[]>([]);
+  const [qcEditing, setQcEditing] = useState<Record<string, {api_key: string; base_url: string; model: string}>>({});
+  // 根据模型名推断能力文字标签
+  // 获取模型标签 + 可用性 emoji
+  // 返回 { label, emoji, available }
+  const getModelInfo = (id: string): { label: string; emoji: string; available: boolean } => {
+    const n = id.toLowerCase();
+    let label = '';
+    if (n.includes('code')) label = '代码';
+    else if (n.includes('thinking')) label = '推理';
+    else if (n.includes('lite') || n.includes('flash') || n.includes('mini')) label = '轻量';
+    else if (n.includes('pro') || n.includes('plus') || n.includes('max')) label = '多模态';
+    else if (n.includes('k2') || n.includes('kimi')) label = '长上下文';
+
+    // 是否支持聊天
+    if (n.includes('lite')) {
+      return { label, emoji: '❌', available: false };
+    }
+    const noChat = ['embedding', 'vision', 'audio', 'tts', 'whisper',
+      'seedance', 'seedream', 'seed3d', 'seededit',
+      'translation', 'smart-router', 'character', 'ui-tars',
+      'browsing', 'seaweed', 'wan2-1', 'hitema', 'hyper3d',
+      'qwen2-5-72b', 'qwen3-0-6b', 'qwen3-8b', 'qwen3-14b', 'qwen3-32b',
+      'mistral-7b', 'glm-4-5-air', 'glm-4-7', 'glm-5-2'];
+    if (noChat.some(k => n.includes(k))) {
+      return { label, emoji: '❌', available: false };
+    }
+    // 是否支持 function calling
+    const fcKws = ['functioncall', 'r1', 'seed-evolving', 'seed-2-0-pro',
+      'seed-2-1', 'seed-1-6-thinking', 'deepseek-r1', 'claude-3', 'claude-3.5',
+      'claude-sonnet', 'claude-opus', 'claude-haiku', 'gpt-4o', 'gpt-4-turbo',
+      'gemini-1.5', 'gemini-2', 'qwen-vl', 'qwen2-vl', 'qwen2.5-vl', 'glm-4v',
+      'seed-2-0-code', 'seed-2-0-mini', 'seed-1-6-flash'];
+    const isFC = fcKws.some(k => n.includes(k));
+    return { label, emoji: isFC ? '✅' : '🟇', available: true };
+  };
+
+  const modelLabel = (id: string) => getModelInfo(id).label;
+
+  // 检测字符串是否像 API Key（UUID 格式或 sk-xxx 格式或超长无特征字符串）
+  // 防止用户/历史数据把 API Key 误存进 model_mapping
+  const isApiKeyLike = (s: string | undefined | null): boolean => {
+    if (!s) return false;
+    const t = s.trim();
+    if (!t) return false;
+    // UUID 格式（如 0f929b81-c9a6-4996-86b3-e9cc78423687）
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return true;
+    // sk-xxx 格式（OpenAI / OpenRouter 等）
+    if (/^sk-[a-zA-Z0-9_-]{20,}$/.test(t)) return true;
+    // 超长无特征字符串（>40 字符且无常见模型分隔符）
+    if (t.length > 40 && !/[-_./]/.test(t)) return true;
+    return false;
+  };
+
+  // API Key 格式校验提示
+  // 根据 provider 和输入的 key 返回提示文案
+  const KNOWN_KEY_PREFIXES: Record<string, string> = {
+    openai: 'sk-…',
+    volcengine: 'UUID 或 AK/SK',
+    deepseek: 'sk-…',
+    azure: 'API Key',
+    openrouter: 'sk-or-…',
+    anthropic: 'sk-ant-…',
+    google: 'AIza…',
+    'eake-api': 'sk-…',
+  };
+  const getKeyHint = (providerId: string, value: string): { text: string; type: string } => {
+    const t = (value || '').trim();
+    if (!t) {
+      const prefix = KNOWN_KEY_PREFIXES[providerId];
+      const name = providers.find(p => p.id === providerId)?.name || providerId;
+      return { text: `${name} 的 Key 格式：${prefix || '请查看官方文档'}`, type: 'info' };
+    }
+    if (t.length < 8) return { text: '⚠️ Key 太短，请确认是否完整', type: 'err' };
+    // 检查是否明显是 URL
+    if (t.startsWith('http://') || t.startsWith('https://')) return { text: '⚠️ 这是 URL 不是 Key', type: 'err' };
+    // 检查是否包含中文
+    if (/[一-鿿]/.test(t)) return { text: '⚠️ Key 包含中文字符，请检查', type: 'err' };
+    // 检查常见前缀
+    if (providerId === 'volcengine' && !/^[0-9a-f]{8}-/i.test(t)) return { text: '🤔 火山引擎 Key 通常是 UUID 格式', type: 'err' };
+    if (providerId === 'openai' && !t.startsWith('sk-')) return { text: '🤔 OpenAI Key 通常以 sk- 开头', type: 'info' };
+    if (providerId === 'deepseek' && !t.startsWith('sk-')) return { text: '🤔 DeepSeek Key 通常以 sk- 开头', type: 'info' };
+    return { text: '✅ 格式符合预期', type: 'ok' };
+  };
+
+  // 检测模型名是否支持聊天（排除 embedding/vision/视频生成/lite 等只能专用接口的模型）
+  // 防止用户把不能聊天的模型保存为默认模型导致 API 报错
+  const NO_CHAT_KEYWORDS = [
+    'embedding', 'vision', 'audio', 'tts', 'whisper',
+    'seedance', 'seedream', 'seed3d', 'seededit',
+    'translation', 'smart-router', 'character', 'ui-tars',
+    'browsing', 'seaweed', 'wan2-1', 'hitema', 'hyper3d',
+    'qwen2-5-72b', 'qwen3-0-6b', 'qwen3-8b', 'qwen3-14b', 'qwen3-32b',
+    'mistral-7b', 'glm-4-5-air', 'glm-4-7', 'glm-5-2',
+  ];
+  const isChatCapable = (modelName: string | undefined | null): boolean => {
+    if (!modelName) return false;
+    const lower = modelName.toLowerCase();
+    if (lower.includes('lite')) return false;  // MEMORY: 豆包 lite 不支持 function calling/聊天
+    if (NO_CHAT_KEYWORDS.some(k => lower.includes(k))) return false;
+    return true;
+  };
+
+  // 预设默认模型列表（未刷新前用）—— 只有 eaKe API 有
+  const DEFAULT_EAKE_MODELS: ModelCapability[] = [
+    {id:'doubao-seed-2.1-pro-260628', name:'豆包 Pro 2.1 260628', function_calling:true},
+    {id:'doubao-seed-2.0-pro', name:'豆包 Pro 2.0', function_calling:true},
+    {id:'doubao-seed-2.0-lite', name:'豆包 Lite 2.0', function_calling:false},
+    {id:'doubao-seed-2.0-code', name:'豆包 Code 2.0', function_calling:true},
+    {id:'doubao-seed-1.6-thinking', name:'豆包思考 1.6', function_calling:true},
+    {id:'doubao-seed-1.6', name:'豆包 1.6', function_calling:true},
+    {id:'doubao-seed-1.6-flash', name:'豆包 Flash 1.6', function_calling:false},
+    {id:'doubao-seed-code', name:'豆包 Code', function_calling:true},
+    {id:'doubao-pro-128k', name:'豆包 Pro 128K', function_calling:true},
+    {id:'doubao-pro-32k', name:'豆包 Pro 32K', function_calling:true},
+    {id:'doubao-pro-4k', name:'豆包 Pro 4K', function_calling:true},
+    {id:'doubao-lite-128k', name:'豆包 Lite 128K', function_calling:false},
+    {id:'doubao-lite-32k', name:'豆包 Lite 32K', function_calling:false},
+    {id:'doubao-lite-4k', name:'豆包 Lite 4K', function_calling:false},
+    {id:'deepseek-v4-pro', name:'DeepSeek V4 Pro', function_calling:true},
+    {id:'deepseek-v4-flash', name:'DeepSeek V4 Flash', function_calling:false},
+    {id:'kimi-k2.6', name:'Kimi K2.6', function_calling:true},
+    {id:'kimi-k2.7-code', name:'Kimi Code K2.7', function_calling:true},
+    {id:'glm-5.2', name:'GLM 5.2', function_calling:true},
+    {id:'minimax-m3', name:'MiniMax M3', function_calling:true},
+    {id:'minimax-m2.7', name:'MiniMax M2.7', function_calling:true},
+  ];
+
+  const [providerModels, setProviderModels] = useState<Record<string, ModelCapability[]>>({
+    'eake-api': DEFAULT_EAKE_MODELS,
+  });
+  const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
+  const [fetchingAllModels, setFetchingAllModels] = useState(false);
+
+  /* ── 一键切换：每个工具当前激活的 Provider ── */
+  const [qsSelected, setQsSelected] = useState<Record<string, string>>({});
+  const [themeMode, setThemeMode] = useState<'system' | 'dark' | 'light'>('dark');
+  const [terminalTool, setTerminalTool] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<string>(() => localStorage.getItem('codexhub-activeView') || 'chat');
+  const [currentSession, setCurrentSession] = useState<any>(null);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarGroupCollapsed, setSidebarGroupCollapsed] = useState<Record<string, boolean>>({});
+
+  /* ── 加载当前工具的会话列表（切换工具 / 首次进入主界面） ── */
+  useEffect(() => {
+    if (phase === 'main') {
+      loadSessions(activeTool);
+    }
+  }, [activeTool, phase]);
+
+  /* ── 侧边栏分组菜单 ── */
+  const SIDEBAR_GROUPS = [
+    { id: 'conversation', label: '对话', children: [
+      { id: 'new-chat', label: '新建对话' },
+      { id: 'recent', label: '历史对话' },
+    ]},
+    { id: 'model', label: '模型', children: [
+      { id: 'quick-config', label: '一键配置' },
+      { id: 'quick-switch', label: '一键切换' },
+    ]},
+    { id: 'tools', label: '工具', children: [
+      { id: 'memory', label: '记忆管理' },
+      { id: 'skills', label: '技能市场' },
+      { id: 'mcp', label: 'MCP 服务' },
+      { id: 'terminal-manager', label: '终端管理' },
+      { id: 'agent-management', label: '一键管理' },
+      { id: 'data', label: '数据管理' },
+    ]},
+    { id: 'settings', label: '设置', children: [
+      { id: 'theme', label: '外观' },
+      { id: 'check-update', label: '更新' },
+      { id: 'donate', label: '捐赠' },
+      { id: 'about', label: '关于' },
+      { id: 'feedback', label: '反馈' },
+      { id: 'guide', label: '使用说明' },
+      { id: 'clear-cache', label: '清除缓存' },
+    ]},
+  ];
+  const toggleSidebarGroup = (id: string) => {
+    setSidebarGroupCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  /* 通用 input 样式 */
+  const inp = {
+    padding:'8px 10px', borderRadius:6, border:'1px solid var(--border)',
+    background:'var(--card)', color:'var(--text)', fontSize:13, width:'100%', boxSizing:'border-box' as const,
+  };
+
+  /* 未安装工具数量 */
+  const notInstalledCount = detectResults.length - installed.length;
+
+  /* ── MCP 数据加载 ── */
+  useEffect(() => { if (mcpOpen) loadMcp(); }, [mcpOpen]);
+
+
+
+  /* ── 检测流程 ── */
+  const startDetect = async () => {
+    setPhase('detecting');
+    setDetectResults([]);
+    setDetectDone(false);
+    const results = await invoke('detect_tools_detail') as ToolDetectResult[];
+    for (let i = 0; i < results.length; i++) {
+      setDetectProgress({ current: i + 1, total: results.length, toolName: results[i].tool_id });
+      setDetectResults(results.slice(0, i + 1));
+      await new Promise(res => setTimeout(res, 300));
+    }
+    const installedList = results.filter(r => r.installed).map(r => r.tool_id);
+    setInstalled(installedList);
+    // 保存检测缓存,下次启动直接跳过检测
+    const cache = results.map(r => [r.tool_id, r.installed]);
+    await invoke('save_detection_cache', { results: cache });
+    setDetectDone(true);
+  };
+
+  // 清除检测缓存并重新检测（红点引导用）
+  const recheckWithClear = async () => {
+    setDotGuideOpen(false);
+    try {
+      await invoke('clear_detection_cache');
+      const det = await invoke('detect_tools_detail') as ToolDetectResult[];
+      setDetectResults(det);
+      setInstalled(det.filter(r => r.installed).map(r => r.tool_id));
+      await invoke('save_detection_cache', { results: det.map(r => [r.tool_id, r.installed]) });
+      showToast('✅ 已清除缓存并重新检测');
+    } catch (e: any) {
+      showToast('❌ 重新检测失败: ' + (e?.message || e));
+    }
+  };
+
+  const enterMain = async () => {
+    const [t, p] = await Promise.all([
+      invoke('get_cli_tools'), invoke('get_providers'),
+    ]);
+    setTools(t as CliTool[]); setProviders(p as Provider[]);
+    setPhase('main');
+    // 进入主界面后恢复当前工具的会话
+    loadSessions(activeTool);
+  };
+
+  const loadMcp = async () => {
+    try {
+      const servers = await invoke('get_mcp_servers') as any[];
+      setMcpServers(servers);
+    } catch(e) { console.error('loadMcp failed', e); }
+  };
+
+  const loadData = async () => {
+    const [t, p, det] = await Promise.all([
+      invoke('get_cli_tools'), invoke('get_providers'), invoke('detect_tools_detail'),
+    ]);
+    setTools(t as CliTool[]); setProviders(p as Provider[]);
+    setDetectResults(det as ToolDetectResult[]);
+    setInstalled((det as ToolDetectResult[]).filter(r => r.installed).map(r => r.tool_id));
+  };
+
+  /* ── 版本检测 & 更新 ── */
+  const checkVersion = async () => {
+    setSettingsOpen(false);
+    setUpdateOpen(true);
+    setUpdateChecking(true);
+    setLatestVersion('');
+    try {
+      const cur = await invoke('get_app_version') as string;
+      setCurrentVersion(cur);
+      const info = await invoke('check_latest_version') as any;
+      const latest = info.version || '';
+      setLatestVersion(latest);
+      setDownloadUrl(info.download_url || '');
+      // 版本比较:只有新版本才标记为可更新
+      if (latest && compareVersions(latest, cur) > 0) {
+        setIsUpdateAvailable(true);
+      } else {
+        setIsUpdateAvailable(false);
+      }
+      setUpdateChecking(false);
+    } catch (e: any) {
+      setUpdateChecking(false);
+      setToast('版本检测失败:' + e.message);
+    }
+  };
+
+  const handleDownloadUpdate = () => {
+    setDownloadProgress({ progress: 0, downloaded: 0, total: 0, status: 'starting' });
+    invoke('download_and_install', { url: downloadUrl }).then(() => {
+      // Don't close modal immediately - let progress bar show completion
+      setTimeout(() => { setUpdateOpen(false); setDownloadProgress(null); }, 2000);
+    }).catch((e: any) => {
+      setToast('下载失败:' + (e?.message || e));
+      // 错误时5秒后自动关闭弹窗
+      setTimeout(() => { setUpdateOpen(false); setDownloadProgress(null); }, 5000);
+    });
+  };
+
+
+  /* ── 登录处理 ── */
+  const handleLogin = async () => {
+    setLoginLoading(true);
+    try {
+      const res = await fetch('https://agent.eake.cn/genhub-login.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: loginForm.username,
+          password: loginForm.password
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '登录失败');
+      }
+      const userData = { id: data.id, name: data.name, avatar_url: data.avatar_urls?.['48'] };
+      setUser(userData);
+      localStorage.setItem('genhub-user', JSON.stringify(userData));
+      setLoginOpen(false);
+      setLoginForm({ username: '', password: '' });
+      showToast('✅ 登录成功');
+    } catch (e: any) {
+      setLoginError(e?.message || '登录失败，请检查用户名和密码');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+  const handleRegister = async () => {
+    if (!registerForm.username || !registerForm.email || !registerForm.password) {
+      setLoginError('请填写所有字段');
+      return;
+    }
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('https://agent.eake.cn/genhub-register.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerForm)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '注册失败');
+      }
+      showToast('✅ 注册成功，请登录');
+      setLoginTab('login');
+      setLoginForm({ username: registerForm.username, password: '' });
+      setRegisterForm({ username: '', email: '', password: '' });
+    } catch (e: any) {
+      setLoginError(e?.message || '注册失败');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('genhub-user');
+    showToast('已退出登录');
+  };
+
+  /* ── 监听下载进度 ── */
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    listen('codexhub_download_progress', (event: any) => {
+      setDownloadProgress(event.payload);
+    }).then((unsub) => { unsubscribe = unsub; });
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, []);
+
+  /* ── 监听 codexhub:// 深链安装结果（Skills中心 一键安装） ── */
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    listen('codexhub-toast', (event: any) => {
+      setToast(event.payload.message);
+      setTimeout(() => setToast(null), 5000);
+    }).then((unsub) => { unsubscribe = unsub; });
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, []);
+
+  // 应用主题（只设置 data-theme，CSS 变量在 App.css 统一管理）
+  const applyTheme = (mode: string) => {
+    document.documentElement.setAttribute('data-theme', mode);
+  };
+
+  // 初始化主题（用 useLayoutEffect 确保在首次渲染前应用）
+  const initTheme = () => {
+    const saved = localStorage.getItem('codexhub-theme') as 'system'|'dark'|'light'|null;
+    if (saved) {
+      setThemeMode(saved);
+      applyTheme(saved);
+    } else {
+      applyTheme('dark');
+    }
+  };
+  useEffect(() => { initTheme(); }, []);
+
+  /* ── 检查登录状态 ── */
+  useEffect(() => {
+    const saved = localStorage.getItem('genhub-user');
+    if (saved) {
+      try { setUser(JSON.parse(saved)); } catch {}
+    }
+  }, []);
+
+  /* ── 启动检测:有缓存时直接判断,无需每次检测 ── */
+  useEffect(() => {
+    let mounted = true;
+    const checkAndStart = async () => {
+      try {
+        // 读取本地缓存：风险同意标记 + 检测缓存
+        const agreed = localStorage.getItem('codexhub-risk-agreed') === 'true';
+        const detected = await invoke('has_detected_before') as boolean;
+        console.log('[checkAndStart] agreed:', agreed, 'detected:', detected);
+        
+        if (agreed) {
+          // 已同意风险 → 加载缓存数据后直接进主界面
+          if (detected) {
+            const cached = await invoke('load_detection_cache') as [string, boolean][];
+            const results = cached.map(([tool_id, installed]) => ({
+              tool_id, tool_name: tool_id, icon: '', installed, config_dir: '', command: ''
+            }));
+            const installedList = cached.filter(([, inst]) => inst).map(([tid]) => tid);
+            setDetectResults(results);
+            setInstalled(installedList);
+          } else {
+            // 无检测缓存：实时检测并持久化，避免红点永久显示"检测中"
+            const det = await invoke('detect_tools_detail') as ToolDetectResult[];
+            setDetectResults(det);
+            setInstalled(det.filter(r => r.installed).map(r => r.tool_id));
+            await invoke('save_detection_cache', { results: det.map(r => [r.tool_id, r.installed]) });
+          }
+          const [t, p] = await Promise.all([invoke('get_cli_tools'), invoke('get_providers')]);
+          setTools(t as CliTool[]); setProviders(p as Provider[]);
+          setPendingPhase('main');
+          setDataReady(true);
+        } else {
+          // 未同意 → 先进 welcome 页
+          if (detected) {
+            const cached = await invoke('load_detection_cache') as [string, boolean][];
+            const results = cached.map(([tool_id, installed]) => ({
+              tool_id, tool_name: tool_id, icon: '', installed, config_dir: '', command: ''
+            }));
+            const installedList = cached.filter(([, inst]) => inst).map(([tid]) => tid);
+            setDetectResults(results);
+            setInstalled(installedList);
+          }
+          const [t, p] = await Promise.all([invoke('get_cli_tools'), invoke('get_providers')]);
+          setTools(t as CliTool[]); setProviders(p as Provider[]);
+          setPendingPhase('welcome');
+          setDataReady(true);
+        }
+      } catch (e) {
+        if (mounted) {
+          setPendingPhase('welcome');
+          setDataReady(true);
+        }
+      }
+    };
+    checkAndStart();
+    return () => { mounted = false; };
+  }, []);
+
+  /* ── 风险提示 ── */
+  const handleRiskAgree = () => {
+    localStorage.setItem('codexhub-risk-agreed', 'true');
+    setRiskNoticeOpen(false);
+    // 同意后执行检测
+    startDetect();
+  };
+
+  const handleRiskDisagree = () => {
+    setRiskNoticeOpen(false);
+  };
+
+  /* ── 交互 ── */
+  const handleToolClick = (toolId: string) => {
+    setActiveTool(toolId);
+    try { localStorage.setItem('genhub-active-tool', toolId); } catch {}
+    loadSessions(toolId);
+  };
+
+  const loadSessions = async (toolId: string) => {
+    try {
+      const list = await invoke('get_chat_sessions', { toolId, userId: user?.id ?? null }) as any[];
+      setSessions(list);
+      setCurrentSession((prev: any) => {
+        if (prev && list.some(s => s.id === prev.id)) return prev;
+        return list.length > 0 ? list[0] : null;
+      });
+    } catch (e) { console.error('[App] loadSessions failed:', e); }
+  };
+
+  const handleRenameSession = async (sessionId: string, title: string) => {
+    try {
+      await invoke('rename_chat_session', { sessionId, title });
+      loadSessions(activeTool);
+    } catch (e) { console.error('[App] rename failed:', e); }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await invoke('delete_chat_session', { sessionId });
+      if (currentSession?.id === sessionId) setCurrentSession(null);
+      loadSessions(activeTool);
+    } catch (e) { console.error('[App] delete failed:', e); }
+  };
+
+  const handleToolDblClick = (toolId: string) => {
+    if (installed.includes(toolId)) {
+      setTerminalTool(toolId);
+    } else {
+      setDownloadToolId(toolId);
+      setDownloadOpen(true);
+    }
+  };
+
+  /* ── 内置下载页数据 ── */
+  const DOWNLOAD_ITEMS = [
+    { id:'claude-code', name:'Claude Code', desc:'Anthropic 官方 AI 编程助手', icon:'claude-code', url:'https://docs.anthropic.com/en/docs/claude-code/overview', installCmd:'npm install -g @anthropic-ai/claude-code' },
+    { id:'codex', name:'Codex CLI', desc:'OpenAI 官方命令行工具', icon:'codex', url:'https://openai.com/index/codex/', installCmd:'npm install -g @openai/codex' },
+    { id:'gemini-cli', name:'Gemini CLI', desc:'Google Gemini 命令行工具', icon:'gemini-cli', url:'https://github.com/google-gemini/gemini-cli', installCmd:'npm install -g @google/gemini-cli' },
+    { id:'opencode', name:'OpenCode', desc:'开源 AI 编程助手', icon:'opencode', url:'https://github.com/opencode-ai/opencode', installCmd:'npm install -g opencode-ai' },
+    { id:'openclaw', name:'OpenClaw', desc:'开源 AI Agent 平台', icon:'openclaw', url:'https://github.com/openclaw/openclaw', installCmd:'npm install -g openclaw' },
+    { id:'hermes-agent', name:'Hermes Agent', desc:'自主 AI 编程助手', icon:'hermes-agent', url:'https://github.com/hermes-engineer/hermes', installCmd:'npm install -g hermes-agent' },
+  ];
+
+  const doSwitch = async (pid: string, force?: boolean) => {
+    if (switching) return;
+    setSwitching(pid);
+    try {
+      const pv = providers.find(p => p.id === pid);
+      // force=true 时跳过 key 检查(saveKey 刚存完 key,state 还没刷新)
+      if (!force && !pv?.api_key) { setKeyFor(pid); return; }
+      await invoke('activate_provider_for_tool', { toolId: activeTool, providerId: pid });
+      await loadData();
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      setToast('❌ 切换失败: ' + errMsg);
+      setTimeout(() => setToast(null), 3000);
+    } finally { setSwitching(null); }
+  };
+
+  const saveKey = async (pid: string) => {
+    if (!keyVal.trim()) { alert('API Key 不能为空'); return; }
+    try {
+      // 1. 先保存 Key 到数据库
+      await invoke('set_provider_api_key', { providerId: pid, apiKey: keyVal.trim() });
+      // 2. 关闭弹窗
+      setKeyVal(''); setKeyFor(null);
+      // 3. 强制切换(force=true 跳过前端 key 检查,后端会校验)
+      await doSwitch(pid, true);
+      setToast('✅ API Key 已保存,Provider 已切换');
+      setTimeout(() => setToast(null), 2500);
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      setToast('❌ 保存失败: ' + errMsg);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const addProv = async () => {
+    if (!newP.id.trim() || !newP.name.trim() || !newP.base_url.trim()) return;
+    await invoke('add_provider', {
+      id: newP.id.trim(), name: newP.name.trim(),
+      baseUrl: newP.base_url.trim(), icon: newP.icon, category: newP.category,
+    });
+    setNewP({ id: '', name: '', base_url: '', icon: '🟢', category: 'domestic' });
+    setAddOpen(false); await loadData();
+  };
+
+  const delProv = async (id: string) => {
+    await invoke('delete_provider', { id }); await loadData();
+  };
+
+  const exportCfg = async () => {
+    try {
+      const data = await invoke('export_all_configs') as string;
+      const path = await save({
+        defaultPath: `codexhub-${new Date().toISOString().slice(0,10)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (path) {
+        await writeTextFile(path, data);
+        showToast('✅ 导出成功');
+      }
+    } catch (e: any) {
+      showToast('❌ 导出失败: ' + (e?.message || e));
+    }
+  };
+
+  /* ── 派生数据 ── */
+  const cur    = tools.find(t => t.id === activeTool);
+  const activePid = cur?.active_provider_id;
+  const activeP   = providers.find(p => p.id === activePid);
+  const curDetect = detectResults.find(r => r.tool_id === activeTool);
+  const domProvs  = providers; // 显示所有 Provider
+
+  /* ═══════════════════════════════════════════
+     辅助函数
+     ═══════════════════════════════════════════ */
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 5000);
+  }, []);
+
+  /* 清除缓存 */
+  const handleClearCache = async () => {
+    if (!confirm('确定要清除所有缓存数据吗？操作不可逆。')) return;
+    try {
+      await invoke('clear_all_cache');
+      showToast('缓存已清除');
+      await loadData();
+    } catch (e: any) {
+      showToast('清除失败: ' + (e?.message || e));
+    }
+  };
+
+  /* ═══════════════════════════════════════════
+     渲染
+     ═══════════════════════════════════════════ */
+
+  /* - 启动闪屏 - */
+  if (phase === 'splash') {
+    return (
+      <div className="splash-screen">
+        <div className="splash-content">
+          <div className="splash-logo-wrap">
+            <img src="/icon.png" alt="CodexHub" className="splash-logo" />
+            <div className="splash-logo-glow" />
+          </div>
+          <h1 className="splash-title">GenHub</h1>
+          <p className="splash-welcome">欢迎回来 👋</p>
+          <div className="splash-tip">{splashTips[splashTip]}</div>
+          <div className="splash-progress-wrap">
+            <div className="splash-progress-bar" style={{ width: `${splashProgress}%` }} />
+          </div>
+          <div className="splash-progress-pct">{splashProgress}%</div>
+          <div style={{marginTop:16,fontSize:11,color:'var(--text-dim)',textAlign:'center',opacity:0.7}}>亚蓝信息技术有限公司</div>
+
+        </div>
+      </div>
+    );
+  }
+
+  /* - 欢迎页 - */
+  if (phase === 'welcome') {
+    return (
+      <div className="welcome-page">
+        <div className="welcome-container">
+          <div className="welcome-logo">
+            <img src="/icon.png" alt="CodexHub" className="welcome-img" />
+          </div>
+          <p className="welcome-greeting">欢迎使用</p>
+          <h1 className="welcome-title">GenHub</h1>
+          <p className="welcome-sub">AI CLI 工具统一配置管理器</p>
+          <div className="welcome-features">
+            <div className="wf-item"><span className="wf-icon">🔧</span><span>统一管理 6 大 AI CLI 工具配置</span></div>
+            <div className="wf-item"><span className="wf-icon">⚡</span><span>一键切换国内 / 海外 Provider</span></div>
+            <div className="wf-item"><span className="wf-icon">📦</span><span>自动写入各工具配置文件</span></div>
+            <div className="wf-item"><span className="wf-icon">🎯</span><span>Skill 扩展市场自由安装</span></div>
+          </div>
+          <button className="btn-detect" onClick={() => { setPhase('detecting'); setRiskNoticeOpen(true); }}>🔍 开始检测工具安装状态</button>
+
+          <div style={{marginTop:56,fontSize:12,lineHeight:1.8,color:'#f59e0b',opacity:0.85}}>
+            <div>亚蓝信息技术有限公司</div>
+            <div>提醒：首次启动需初始化系统组件，加载时间可能较长与繁琐，敬请耐心等待。</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* - 检测中 - */
+  if (phase === 'detecting') {
+    const pct = Math.round((detectProgress.current / detectProgress.total) * 100);
+    const toolLabels: Record<string,string> = {
+      'claude-code':'Claude Code','codex':'Codex','gemini-cli':'Gemini CLI',
+      'opencode':'OpenCode','openclaw':'OpenClaw','hermes-agent':'Hermes Agent',
+      'claude-desktop':'Claude Desktop','qoder-cli':'Qoder CLI',
+      'env-node':'Node.js','env-npm':'npm','env-python':'Python',
+      'env-git':'Git','env-pnpm':'pnpm','env-yarn':'Yarn','env-docker':'Docker',
+    };
+    return (
+      <div className="welcome-page">
+        <div className="welcome-container">
+          <h2 style={{color:'#00f0ff',marginBottom:16}}>正在检测工具安装状态</h2>
+          <div style={{width:'80%',margin:'20px auto'}}>
+            <div style={{background:'var(--bg3)',borderRadius:4,height:8,overflow:'hidden'}}>
+              <div style={{width:`${pct}%`,height:'100%',background:'linear-gradient(90deg,#00f0ff,#a855f7)',transition:'width 0.3s'}} />
+            </div>
+            <div style={{color:'#aaa',fontSize:12,marginTop:8}}>
+              {detectProgress.current}/{detectProgress.total} - 正在检测 {toolLabels[detectProgress.toolName] || detectProgress.toolName}...
+            </div>
+          </div>
+          {detectResults.length > 0 && (
+            <div style={{width:'80%',margin:'16px auto',textAlign:'left'}}>
+              {detectResults.map(r => {
+                const isInstalling = installingTool === r.tool_id;
+                const NPM_PKG: Record<string, string> = {
+                  'env-yarn': 'yarn',
+                  'claude-code': '@anthropic-ai/claude-code',
+                  'codex': '@openai/codex',
+                  'gemini-cli': '@google/gemini-cli',
+                  'opencode': 'opencode-ai',
+                  'openclaw': 'openclaw',
+                  'hermes-agent': 'hermes-agent',
+                  'qoder-cli': '@qoder-ai/qodercli',
+                };
+                const DOWNLOAD_URL: Record<string, string> = {
+                  'env-docker': 'https://www.docker.com/products/docker-desktop/',
+                  'claude-desktop': 'https://claude.com/download',
+                };
+                const npmPkg = NPM_PKG[r.tool_id];
+                const downloadUrl = DOWNLOAD_URL[r.tool_id];
+                return (
+                <div key={r.tool_id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',color: r.installed ? '#4ade80' : '#f87171',fontSize:13}}>
+                  <span>{r.tool_name}</span>
+                  <span>
+                    {r.installed ? '✅ 已安装' : (
+                      <span style={{display:'inline-flex',alignItems:'center',gap:8}}>
+                        {npmPkg && (
+                          <button disabled={isInstalling} onClick={async()=>{
+                            setInstallingTool(r.tool_id);
+                            try {
+                              await invoke('install_npm_package', {pkg: npmPkg});
+                              const results = await invoke('detect_tools_detail') as ToolDetectResult[];
+                              setDetectResults(results);
+                            } catch(e){alert('安装失败: '+e);}
+                            setInstallingTool(null);
+                          }} style={{background:'#00f0ff',border:'none',color:'#000',padding:'3px 10px',borderRadius:4,cursor:isInstalling?'not-allowed':'pointer',fontSize:11,fontWeight:600,opacity:isInstalling?0.6:1}}>{isInstalling ? '安装中...' : '一键安装'}</button>
+                        )}
+                        {downloadUrl && (
+                          <button onClick={async()=>{
+                            try { const {open}=await import('@tauri-apps/plugin-shell'); await open(downloadUrl); } catch(_){window.open(downloadUrl);}
+                          }} style={{background:'#a855f7',border:'none',color:'#fff',padding:'3px 10px',borderRadius:4,cursor:'pointer',fontSize:11,fontWeight:600}}>下载安装</button>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );})}
+            </div>
+          )}
+          {/* 兜底：这5个工具如果 Rust 没返回，强制显示 */}
+          {(() => {
+            const idsInResults = new Set(detectResults.map(r => r.tool_id));
+            const missingHardcoded = MISSING_TOOLS_CONFIG.filter(m => !idsInResults.has(m.id));
+            if (missingHardcoded.length === 0) return null;
+            return (
+              <>
+                <div style={{color:'#f59e0b',fontSize:12,marginTop:16,padding:'0 10%',textAlign:'left'}}>以下工具未检测到，已为您准备安装方式：</div>
+                {missingHardcoded.map(m => {
+                  const isInstalling = installingTool === m.id;
+                  return (
+                    <div key={m.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',color:'#f87171',fontSize:13,width:'80%',margin:'0 auto'}}>
+                      <span>{m.name}</span>
+                      <span>
+                        {m.type === 'download' ? (
+                          <button onClick={async()=>{
+                            try { const {open}=await import('@tauri-apps/plugin-shell'); await open(m.url); } catch(_){ window.open(m.url); }
+                          }} style={{background:'#a855f7',border:'none',color:'#fff',padding:'3px 10px',borderRadius:4,cursor:'pointer',fontSize:11,fontWeight:600}}>下载安装</button>
+                        ) : (
+                          <button disabled={isInstalling} onClick={async()=>{
+                            setInstallingTool(m.id);
+                            try { await invoke('install_npm_package', {pkg: m.pkg || ''}); showToast('✅ 安装成功'); } catch(e: any){ showToast('❌ 安装失败: '+(e?.message||e)); }
+                            setInstallingTool(null);
+                          }} style={{background:'#00f0ff',border:'none',color:'#000',padding:'3px 10px',borderRadius:4,cursor:isInstalling?'not-allowed':'pointer',fontSize:11,fontWeight:600,opacity:isInstalling?0.6:1}}>
+                            {isInstalling ? '安装中...' : '一键安装'}
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
+          {detectDone && (
+            <div style={{textAlign:'center',marginTop:24}}>
+              <div style={{color:'#4ade80',fontSize:16,marginBottom:12}}>✅ 环境检测完成</div>
+              <button className="btn-detect" onClick={enterMain} style={{background:'linear-gradient(90deg,#00f0ff,#a855f7)',border:'none',color:'#000',padding:'10px 32px',borderRadius:6,cursor:'pointer',fontSize:14,fontWeight:600}}>下一步</button>
+            </div>
+          )}
+        </div>
+        <RiskNoticeModal
+          open={riskNoticeOpen}
+          onAgree={handleRiskAgree}
+          onDisagree={() => { setRiskNoticeOpen(false); invoke('exit_app'); }}
+          currentVersion={currentVersion}
+        />
+      </div>
+    );
+  }
+
+  /* - 主界面(三栏布局) - */
+  return (
+    <div className="app">
+      {/* 顶部 Header 栏 */}
+      <header className="app-header">
+        <div className="header-left">
+          {/* 6个工具标签 */}
+          <span className="header-tool-tabs">
+            {tools.map(t => (
+              <span key={t.id}
+                className={`header-tab${t.id === activeTool ? ' active' : ''}`}
+                onClick={() => { handleToolClick(t.id); setActiveView('chat'); }}
+                title={t.name}
+              >{TOOL_LOGOS[t.id]}</span>
+            ))}
+          </span>
+        </div>
+        <div className="header-right">
+          <span className="header-tool-name">
+            <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center', position: 'relative' }}>
+              {!curDetect ? (
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#94a3b8', display: 'inline-block' }} title="检测中..." />
+              ) : curDetect.installed ? (
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} title="已安装" />
+              ) : (
+                <span
+                  onClick={(e) => { e.stopPropagation(); setDotGuideOpen(v => !v); }}
+                  style={{ width: 10, height: 10, borderRadius: '50%', background: '#f87171', display: 'inline-block', cursor: 'pointer', boxShadow: '0 0 0 3px rgba(248,113,113,0.25)' }}
+                  title="未安装 - 点击查看原因"
+                />
+              )}
+              {dotGuideOpen && curDetect && !curDetect.installed && (
+                <>
+                  <div className="dot-guide-mask" onClick={() => setDotGuideOpen(false)} />
+                  <div className="dot-guide-pop">
+                    <div className="dgt-title">⚠ {curDetect.tool_name} 未检测到</div>
+                    <div className="dgt-reason">可能原因：</div>
+                    <ul className="dgt-list">
+                      <li>工具尚未安装</li>
+                      <li>检测缓存过时（已装但仍显示红点）</li>
+                      <li>系统 PATH 未包含该工具路径</li>
+                    </ul>
+                    <div className="dgt-actions">
+                      <button className="dgt-btn dgt-primary" onClick={recheckWithClear}>清除缓存并重新检测</button>
+                      <button className="dgt-btn" onClick={() => { setDotGuideOpen(false); setActiveView('terminal-manager'); }}>终端管理启动</button>
+                      <button className="dgt-btn" onClick={() => { setDotGuideOpen(false); setActiveView('agent-management'); }}>一键安装</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </span>
+          </span>
+        </div>
+      </header>
+
+      {/* 三栏布局 */}
+      <div className="app-body">
+        {/* 图标轨道 */}
+        <div className={`icon-track${sidebarCollapsed ? ' collapsed' : ''}`} onClick={sidebarCollapsed ? () => setSidebarCollapsed(false) : undefined}>
+          {/* 收起按钮 - 右上角小箭头 */}
+          <div className="track-collapse-btn" onClick={() => setSidebarCollapsed(v => !v)} title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {sidebarCollapsed ? <polyline points="9 18 15 12 9 6"/> : <polyline points="15 18 9 12 15 6"/>}
+            </svg>
+          </div>
+          {SIDEBAR_GROUPS.map(group => (
+            <div key={group.id} className="track-group">
+              <div className="track-group-header" onClick={() => toggleSidebarGroup(group.id)}>
+                <span className="track-group-label">{group.label}</span>
+                <svg className={`track-arrow${sidebarGroupCollapsed[group.id] ? ' collapsed' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              {!sidebarGroupCollapsed[group.id] && (
+                <div className="track-group-items">
+                  {group.children.map(sub => {
+                    const handleClick = async () => {
+                      if (sub.id === 'quick-config') {
+                        setQcProviders(providers);
+                        const init: Record<string, {api_key: string; base_url: string; model: string}> = {};
+                        // 异步读取每个 provider 的默认模型名称
+                        const models = await Promise.all(providers.map(p => 
+                          invoke('get_provider_default_model', { providerId: p.id }) as Promise<string | null>
+                        ));
+                        providers.forEach((p, i) => { 
+                          init[p.id] = { api_key: p.api_key || '', base_url: p.base_url || '', model: models[i] || '' };
+                        });
+                        setQcEditing(init);
+                        setQuickConfigOpen(true);
+                      } else if (sub.id === 'quick-switch') {
+                        const sel: Record<string, string> = {};
+                        tools.forEach(t => { sel[t.id] = t.active_provider_id || ''; });
+                        setQsSelected(sel);
+                        setQuickSwitchOpen(true);
+                      } else if (sub.id === 'mcp') {
+                        setMcpOpen(true);
+                      } else if (sub.id === 'skills') {
+                        setSkillsModalOpen(true);
+                      } else if (sub.id === 'bundled-skills') {
+                        setBundledSkillsOpen(true);
+                      } else if (sub.id === 'install-tools') {
+                        setActiveView('agent-management');
+                      } else if (sub.id === 'data') {
+                        setDataOpen(true);
+                      } else if (sub.id === 'memory') {
+                        setActiveView('memory');
+                      } else if (sub.id === 'theme') {
+                        setThemeOpen(true);
+                      } else if (sub.id === 'check-update') {
+                        checkVersion();
+                      } else if (sub.id === 'changelog') {
+                        setUpdateOpen(true);
+                      } else if (sub.id === 'feedback') {
+                        setFeedbackOpen(true);
+                      } else if (sub.id === 'about') {
+                        setAboutOpen(true);
+                      } else if (sub.id === 'guide') {
+                        setGuideOpen(true);
+                      } else if (sub.id === 'clear-cache') {
+                        setCacheCleanOpen(true);
+                      } else if (sub.id === 'donate') {
+                        setDonateOpen(true);
+                      } else if (sub.id === 'new-chat') {
+                        setActiveView('chat');
+                        (async () => {
+                          try {
+                            const s = await invoke('create_chat_session', { toolId: activeTool, userId: user?.id ?? null }) as any;
+                            setCurrentSession(s);
+                            loadSessions(activeTool);
+                          } catch(e) {
+                            showToast('创建会话失败: ' + e);
+                          }
+                        })();
+                      } else if (sub.id === 'recent') {
+                        setActiveView('recent');
+                      } else {
+                        setActiveView(sub.id);
+                      }
+                    };
+                    return (
+                      <div key={sub.id}
+                        className={`track-item${activeView === sub.id ? ' active' : ''}`}
+                        onClick={handleClick}
+                        title={sub.label}
+                        style={{position: 'relative'}}
+                      >
+                        {sub.label}
+                        {sub.id === 'check-update' && isUpdateAvailable && (
+                          <span style={{
+                            position: 'absolute', top: 4, right: 4,
+                            width: 8, height: 8, borderRadius: '50%',
+                            background: '#f87171', border: '2px solid var(--bg)'
+                          }} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* 登录+版本号固定容器 */}
+          <div className="track-login-area">
+            <div
+              onClick={() => user ? setUserProfileOpen(true) : setLoginOpen(true)}
+              title={user ? `已登录: ${user.name}` : '登录到网站'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 24,
+                height: 24,
+                borderRadius: '50%',
+                border: '1px solid var(--border)',
+                background: user ? 'linear-gradient(135deg, #00f0ff, #a855f7)' : 'rgba(0, 240, 255, 0.06)',
+                cursor: 'pointer',
+                fontSize: 11,
+                color: user ? '#fff' : '#00f0ff',
+                fontWeight: 600
+              }}
+            >{user ? user.name.charAt(0).toUpperCase() : '?'}</div>
+            <div className="track-version" onClick={() => setUpdateOpen(true)} title="查看更新日志" style={{position:'relative', padding: '6px 4px 8px'}}>v0.1.6{isUpdateAvailable && (<span style={{position:'absolute',top:-2,right:-8,width:8,height:8,borderRadius:'50%',background:'#f87171'}} />)}</div>
+          </div>
+        </div>
+
+        {/* ChatSidebar */}
+        <div style={{display:'none'}}><ChatSidebar
+          toolId={activeTool}
+          activeView={activeView}
+          onViewChange={setActiveView}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(v => !v)}
+          onOpenChangelog={() => setUpdateOpen(true)}
+          onOpenProviders={() => setProviderModalOpen(true)}
+          onOpenTheme={() => setThemeOpen(true)}
+          onOpenDonate={() => setDonateOpen(true)}
+          onCheckVersion={() => checkVersion()}
+          onOpenQuickConfig={() => {
+            setQcProviders(providers);
+            const init: Record<string, {api_key: string; base_url: string; model: string}> = {};
+            providers.forEach(p => { init[p.id] = { api_key: p.api_key || '', base_url: p.base_url || '', model: '' }; });
+            setQcEditing(init);
+            setQuickConfigOpen(true);
+          }}
+          onOpenQuickSwitch={() => {
+            const sel: Record<string, string> = {};
+            tools.forEach(t => { sel[t.id] = t.active_provider_id || ''; });
+            setQsSelected(sel);
+            setQuickSwitchOpen(true);
+          }}
+          onOpenMcp={() => setMcpOpen(true)}
+          onOpenAbout={() => setAboutOpen(true)}
+        /></div>
+
+
+        {/* 主内容区 */}
+        <main className="main-content">
+          {activeView === 'chat' && <ChatMain toolId={activeTool} session={currentSession} sessions={sessions} onSessionChange={(s: any) => setCurrentSession(s)} onNewSession={async () => { try { const s = await invoke('create_chat_session', { toolId: activeTool, userId: user?.id ?? null }) as any; setCurrentSession(s); loadSessions(activeTool); } catch(e) { showToast('创建会话失败'); } }} onToast={showToast} activeView={activeView} onViewChange={setActiveView} onBundledSkillsOpen={() => setBundledSkillsOpen(true)} user={user} onLogin={() => setLoginOpen(true)} onLogout={handleLogout} onOpenQuickSwitch={() => { setQuickSwitchOpen(true); setActiveView('chat'); }} />}
+          {activeView === 'providers' && curDetect?.installed && (
+            <div className="providers-panel">
+              <div className="panel-top">
+                <div style={{display:'flex',alignItems:'center',gap:10,flex:1}}>
+                  {TOOL_LOGOS[activeTool]}
+                  <h2 className="panel-title">{cur?.name} - 切换供应商</h2>
+                </div>
+                <button className="panel-close-btn" onClick={() => setActiveView('chat')} title="关闭">✕</button>
+                {activeP && <span className="current-tag"><span style={{marginRight:6}}>{PROVIDER_LOGOS[activeP.id] || activeP.icon}</span>{activeP.name}</span>}
+              </div>
+              <div className="p-grid">
+                {domProvs.map(p => {
+                  const isActive = p.id === activePid;
+                  const hasKey = !!p.api_key;
+                  const brand = PROVIDER_BRAND[p.id];
+                  return (
+                    <div key={p.id} className={`p-card ${isActive ? 'active' : ''} ${!hasKey ? 'no-key' : ''}`}
+                      style={brand ? { borderTop: `3px solid ${brand.bg}` } : undefined}
+                    >
+                      <span className="p-icon">{PROVIDER_LOGOS[p.id] || p.icon}</span>
+                      <div className="p-info">
+                        <div className="p-name">{p.name}</div>
+                        <div className="p-url">{p.base_url}</div>
+                        <div className="p-key-line">
+                          {hasKey ? <span className="key-ok">✓ 已配置</span> : <span className="key-no">✗ 未配置</span>}
+                        </div>
+                      </div>
+                      <div className="p-actions">
+                        {isActive ? <span className="btn-active-badge">使用中</span> : <button className="btn-switch" onClick={() => doSwitch(p.id)} disabled={switching !== null}>切换</button>}
+                        <button className="btn-mini" onClick={() => { setKeyFor(p.id); setKeyVal(p.api_key || ''); }}>🔑</button>
+                        {p.category !== 'domestic' && <button className="btn-mini" onClick={() => delProv(p.id)}>🗑</button>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="panel-tip">💡 切换后配置自动写入 <b>{cur?.name}</b> 的配置文件。</div>
+            </div>
+          )}
+          {activeView === 'providers' && curDetect && !curDetect.installed && (
+            <div className="not-installed-banner">
+              <div className="nib-left">
+                {TOOL_LOGOS[curDetect.tool_id]}
+                <div>
+                  <div className="nib-title">{curDetect.tool_name} 未安装</div>
+                  <div className="nib-detail">配置目录: {curDetect.config_dir}</div>
+                </div>
+              </div>
+              <button className="btn-accent" onClick={() => { setDownloadToolId(curDetect.tool_id); setDownloadOpen(true); }}>前往下载 →</button>
+            </div>
+          )}
+          {activeView === 'terminal' && <Terminal toolId={activeTool} toolName={cur?.name || activeTool} onClose={() => setActiveView('chat')} />}
+          {activeView === 'skills' && <SkillsPanel toolId={activeTool} onClose={() => setActiveView('chat')} onToast={showToast} />}
+
+          {activeView === 'memory' && (
+            <div className="overlay" onClick={() => setActiveView('chat')}>
+              <MemoryPanel toolId={activeTool} onClose={() => setActiveView('chat')} />
+            </div>
+          )}
+          {activeView === 'sandbox' && <SandboxPanel onClose={() => setActiveView('chat')} />}
+          {activeView === 'agent-management' && <AgentManager onToast={showToast} onClose={() => setActiveView('chat')} />}
+          {activeView === 'terminal-manager' && <TerminalManager />}
+          {activeView === 'cron' && <CronPanel toolId={activeTool} onClose={() => setActiveView('chat')} />}
+          {activeView === 'orchestrator' && <OrchestratorPanel onClose={() => setActiveView('chat')} onToast={showToast} />}
+          {activeView === 'recent' && (
+            <div style={{padding:24,maxWidth:700,margin:'0 auto',width:'100%'}}>
+              <h3 style={{fontSize:16,fontWeight:600,color:'var(--text)',marginBottom:16}}>📋 历史对话</h3>
+              {sessions.length === 0 ? (
+                <div style={{textAlign:'center',padding:40,color:'var(--text-dim)',fontSize:14}}>暂无对话记录</div>
+              ) : (
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {sessions.map((s: any) => (
+                    <div key={s.id}
+                      style={{
+                        display:'flex',alignItems:'center',justifyContent:'space-between',
+                        padding:'12px 16px',borderRadius:8,
+                        background: currentSession?.id === s.id ? 'var(--accent-bg)' : 'var(--card)',
+                        border: currentSession?.id === s.id ? '1px solid var(--accent)' : '1px solid var(--border)',
+                        cursor:'pointer',transition:'all 0.15s'
+                      }}
+                      onClick={() => { setCurrentSession(s); setActiveView('chat'); }}
+                    >
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,color:'var(--text)',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                          {s.title || '新对话'}
+                        </div>
+                        <div style={{fontSize:11,color:'var(--text-dim)',marginTop:2}}>
+                          {s.message_count ? `${s.message_count} 条消息` : '空对话'} · {s.updated_at ? new Date(Number(s.updated_at)*1000).toLocaleString('zh-CN') : ''}
+                        </div>
+                      </div>
+                      <div style={{display:'flex',gap:6,marginLeft:12}}>
+                        <button title="重命名" onClick={e => { e.stopPropagation(); const t = prompt('新名称', s.title||''); if(t!==null) handleRenameSession(s.id, t); }} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-dim)',fontSize:14,padding:'2px 6px',borderRadius:4}}>✏️</button>
+                        <button title="删除" onClick={e => { e.stopPropagation(); if(confirm('确认删除此对话？')) handleDeleteSession(s.id); }} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-dim)',fontSize:14,padding:'2px 6px',borderRadius:4}}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {activeView === 'settings' && (
+            <div style={{padding:24,textAlign:'center'}}>
+              <div style={{fontSize:48,marginBottom:12}}>⚙️</div>
+              <p style={{fontSize:14}}>设置</p>
+            </div>
+          )}
+          {activeView === 'about' && (
+            <div style={{padding:24,textAlign:'center'}}>
+              <img src="/logos/codexhub-logo.png" alt="GenHub" style={{width:64,height:64,marginBottom:12}} />
+              <h4>GenHub</h4>
+              <p style={{fontSize:13,color:'var(--text2)',marginTop:4}}>版本 v0.1.6</p>
+              <p style={{fontSize:11,color:'var(--text3)',marginTop:8}}>AI CLI 工具统一配置管理器</p>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* ═══ 弹窗 ═══ */}
+
+      {/* API Key 弹窗 */}
+      {keyFor && (
+        <div className="overlay" onClick={() => setKeyFor(null)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>🔑 配置 API Key</h3>
+            <p><span style={{marginRight:6,display:'inline-flex',alignItems:'center'}}>{PROVIDER_LOGOS[keyFor] || providers.find(p => p.id === keyFor)?.icon}</span> {providers.find(p => p.id === keyFor)?.name}</p>
+            <div className="key-input-wrap" onContextMenu={e => e.preventDefault()}>
+              <input type={showKey ? 'text' : 'password'} placeholder="输入 API Key..." value={keyVal}
+                onChange={e => { setKeyVal(e.target.value); }} autoFocus
+                style={{padding:'9px 12px',background:'var(--card)',border:'1px solid var(--border)',
+                  borderRadius:'6px',color:'var(--text)',fontSize:'13px',outline:'none',flex:1}}
+                onKeyDown={e => e.key === 'Enter' && saveKey(keyFor)}
+              />
+              <button className="key-toggle-btn" onClick={() => setShowKey(!showKey)}
+                title={showKey ? '隐藏' : '显示'}>{showKey ? '👁' : '👁‍🗨'}</button>
+            </div>
+            <div className={`key-hint ${getKeyHint(keyFor, keyVal).type}`}>{getKeyHint(keyFor, keyVal).text}</div>
+            <div className="modal-btns">
+              <button className="btn-sm" onClick={() => setKeyFor(null)}>取消</button>
+              <button className="btn-accent" onClick={() => saveKey(keyFor)}>保存并切换</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 登录/注册弹窗 */}
+      {loginOpen && (
+        <div className="overlay" onClick={() => { setLoginOpen(false); setLoginError(''); }}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth: 360}}>
+            <h3>🔐 {loginTab === 'login' ? '登录' : '注册'} GenHub 账户</h3>
+            <p style={{fontSize: 12, color: 'var(--text2)', marginBottom: 16}}>
+              {loginTab === 'login' ? '使用 GenHub 平台账号登录' : '注册 GenHub 平台账号'}
+            </p>
+
+            {/* Tab 切换 */}
+            <div style={{display:'flex', gap:8, marginBottom:16}}>
+              <button
+                style={{flex:1, padding:'8px 0', borderRadius:6, border:'1px solid var(--border)', background: loginTab==='login' ? 'var(--cyan-bg)' : 'transparent', color: loginTab==='login' ? 'var(--cyan)' : 'var(--text2)', cursor:'pointer', fontSize:13}}
+                onClick={() => { setLoginTab('login'); setLoginError(''); }}
+              >登录</button>
+              <button
+                style={{flex:1, padding:'8px 0', borderRadius:6, border:'1px solid var(--border)', background: loginTab==='register' ? 'var(--cyan-bg)' : 'transparent', color: loginTab==='register' ? 'var(--cyan)' : 'var(--text2)', cursor:'pointer', fontSize:13}}
+                onClick={() => { setLoginTab('register'); setLoginError(''); }}
+              >注册</button>
+            </div>
+
+            {loginTab === 'login' ? (
+              <>
+                <div className="field">
+                  <label>用户名 / 邮箱</label>
+                  <input
+                    type="text"
+                    placeholder="输入用户名或邮箱"
+                    value={loginForm.username}
+                    onChange={e => setLoginForm({...loginForm, username: e.target.value})}
+                    autoFocus
+                    style={inp}
+                  />
+                </div>
+                <div className="field" style={{marginTop: 12}}>
+                  <label>密码</label>
+                  <input
+                    type="password"
+                    placeholder="输入密码"
+                    value={loginForm.password}
+                    onChange={e => setLoginForm({...loginForm, password: e.target.value})}
+                    onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                    style={inp}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="field">
+                  <label>用户名</label>
+                  <input type="text" placeholder="3位以上" value={registerForm.username} onChange={e => setRegisterForm({...registerForm, username: e.target.value})} style={inp} />
+                </div>
+                <div className="field" style={{marginTop: 10}}>
+                  <label>邮箱</label>
+                  <input type="email" placeholder="用于找回密码" value={registerForm.email} onChange={e => setRegisterForm({...registerForm, email: e.target.value})} style={inp} />
+                </div>
+                <div className="field" style={{marginTop: 10}}>
+                  <label>密码</label>
+                  <input type="password" placeholder="6位以上" value={registerForm.password} onChange={e => setRegisterForm({...registerForm, password: e.target.value})} onKeyDown={e => e.key === 'Enter' && handleRegister()} style={inp} />
+                </div>
+              </>
+            )}
+
+            {loginError && (
+              <p style={{color:'#ff6b6b', fontSize:12, marginTop:10}}>{loginError}</p>
+            )}
+
+            <div className="modal-btns" style={{marginTop: 20}}>
+              <button className="btn-sm" onClick={() => { setLoginOpen(false); setLoginError(''); }}>取消</button>
+              <button
+                className="btn-accent"
+                onClick={loginTab === 'login' ? handleLogin : handleRegister}
+                disabled={loginLoading || (loginTab === 'login' ? (!loginForm.username || !loginForm.password) : (!registerForm.username || !registerForm.email || !registerForm.password))}
+              >
+                {loginLoading ? '处理中...' : (loginTab === 'login' ? '登录' : '注册')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 用户信息弹窗 */}
+      {userProfileOpen && user && (
+        <div className="overlay" onClick={() => setUserProfileOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth: 320}}>
+            <h3>👤 账户信息</h3>
+            <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, margin: '20px 0'}}>
+              <span style={{
+                width: 64, height: 64, borderRadius: '50%',
+                background: 'linear-gradient(135deg, #00f0ff, #a855f7)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28, color: '#fff', fontWeight: 700,
+                border: '2px solid var(--accent)'
+              }}>{user.name.charAt(0).toUpperCase()}</span>
+              <div style={{fontSize: 16, fontWeight: 600, color: 'var(--text)'}}>{user.name}</div>
+              <div style={{fontSize: 12, color: 'var(--text2)'}}>ID: {user.id}</div>
+            </div>
+            <div style={{borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 8}}>
+              <div style={{fontSize: 12, color: 'var(--text2)', textAlign: 'center', marginBottom: 16}}>
+                GenHub 平台账号登录<br/>
+                注册后会话记录保存
+              </div>
+              <button
+                className="btn-sm"
+                onClick={() => { handleLogout(); setUserProfileOpen(false); }}
+                style={{width: '100%', borderColor: '#f87171', color: '#f87171'}}
+              >
+                退出登录
+              </button>
+            </div>
+            <div className="modal-btns" style={{marginTop: 12}}>
+              <button className="btn-accent" onClick={() => setUserProfileOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 添加供应商弹窗 */}
+      {addOpen && (
+        <div className="overlay" onClick={() => setAddOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>➕ 添加供应商</h3>
+            <div className="field"><label>ID</label><input placeholder="my-provider" value={newP.id} onChange={e => setNewP({...newP,id:e.target.value})}/></div>
+            <div className="field"><label>名称</label><input placeholder="我的模型" value={newP.name} onChange={e => setNewP({...newP,name:e.target.value})}/></div>
+            <div className="field"><label>Base URL</label><input placeholder="https://api.example.com/v1" value={newP.base_url} onChange={e => setNewP({...newP,base_url:e.target.value})}/></div>
+            <div className="field"><label>图标 emoji</label><input placeholder="🟢" value={newP.icon} onChange={e => setNewP({...newP,icon:e.target.value})}/></div>
+            <div className="field">
+              <label>分类</label>
+              <select value={newP.category} onChange={e => setNewP({...newP,category:e.target.value})}>
+                <option value="domestic">国内模型</option>
+                <option value="overseas">海外模型</option>
+                <option value="relay">中转服务</option>
+                <option value="official">官方</option>
+              </select>
+            </div>
+            <div className="modal-btns">
+              <button className="btn-sm" onClick={() => setAddOpen(false)}>取消</button>
+              <button className="btn-accent" onClick={addProv}>添加</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 内置下载页弹窗 */}
+      {downloadOpen && (() => {
+        const item = DOWNLOAD_ITEMS.find(d => d.id === downloadToolId) || DOWNLOAD_ITEMS[0];
+        return (
+          <div className="overlay" onClick={() => setDownloadOpen(false)}>
+            <div className="modal-box modal-lg" onClick={e => e.stopPropagation()}>
+              <h3>📥 下载安装 - {item.name}</h3>
+              <div style={{display:'flex',gap:16,alignItems:'center',marginBottom:16,padding:'12px',background:'var(--card)',borderRadius:8,border:'1px solid var(--border)'}}>
+                <div style={{fontSize:36}}>{TOOL_LOGOS[item.id] || '📦'}</div>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,color:'var(--text)'}}>{item.name}</div>
+                  <div style={{fontSize:12,color:'var(--text-dim)',marginTop:2}}>{item.desc}</div>
+                </div>
+              </div>
+
+              {/* 安装方式 */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text)',marginBottom:8}}>📌 推荐安装方式(npm)</div>
+                <div style={{display:'flex',gap:8}}>
+                  <code style={{flex:1,padding:'10px 12px',background:'#0d1117',border:'1px solid #30363d',borderRadius:6,color:'#58a6ff',fontSize:12,fontFamily:'Consolas,monospace',userSelect:'all'}}>{item.installCmd}</code>
+                  <button className="btn-accent" style={{padding:'8px 16px'}} onClick={() => {
+                    navigator.clipboard.writeText(item.installCmd);
+                    // TODO: toast 提示
+                  }}>复制</button>
+                </div>
+              </div>
+
+              {/* 官方链接 */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text)',marginBottom:8}}>🔗 官方资源</div>
+                <a href={item.url} target="_blank" rel="noopener noreferrer" style={{display:'block',padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:6,color:'var(--accent)',textDecoration:'none',fontSize:13}}>
+                  📄 {item.name} 官方文档/下载页 →
+                </a>
+              </div>
+
+              {/* 其他工具快捷入口 */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text)',marginBottom:8}}>📦 其他工具</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+                  {DOWNLOAD_ITEMS.filter(d => d.id !== downloadToolId).map(d => (
+                    <button key={d.id} className="btn-sm" style={{justifyContent:'flex-start',padding:'6px 10px'}} onClick={() => setDownloadToolId(d.id)}>
+                      <span style={{marginRight:6}}>{TOOL_LOGOS[d.id] || '📦'}</span> {d.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="modal-btns">
+                <button className="btn-accent" onClick={() => setDownloadOpen(false)}>关闭</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 风险提示弹窗 */}
+      <RiskNoticeModal
+        open={riskNoticeOpen}
+        onAgree={handleRiskAgree}
+        onDisagree={() => {
+          setRiskNoticeOpen(false);
+          invoke('exit_app');
+        }}
+        currentVersion={currentVersion}
+      />
+
+      {/* 关于弹窗 */}
+      {aboutOpen && (
+        <div className="overlay" onClick={() => {
+          setAboutOpen(false);
+          // 如果未同意风险提示，重新打开
+          if (!localStorage.getItem('codexhub-risk-agreed')) {
+            setRiskNoticeOpen(true);
+          }
+        }}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:480,maxHeight:'85vh',overflowY:'auto'}}>
+            <h3>ℹ️ 关于 CodexHub</h3>
+            <div style={{textAlign:'center',margin:'16px 0 12px'}}>
+              <img src="/icon.png" alt="" style={{width:56,height:56}} />
+              <div style={{fontSize:'20px',fontWeight:700,color:'var(--accent)',marginTop:'8px'}}>GenHub</div>
+              <div style={{color:'var(--text2)',fontSize:'12px',marginTop:'4px'}}>版本 {currentVersion}</div>
+            </div>
+            <div style={{fontSize:'13px',color:'var(--text2)',lineHeight:'1.7',marginBottom:'12px',textAlign:'center'}}>
+              AI CLI 工具统一配置管理器，支持 6 款主流 AI 编程助手
+            </div>
+            {/* Tab 切换 */}
+            <div style={{display:'flex',gap:0,marginBottom:14,borderBottom:'1px solid var(--border)'}}>
+              <button className={`btn-sm ${aboutTab==='project' ? 'btn-accent' : ''}`} style={{flex:1,borderBottomLeftRadius:0,borderBottomRightRadius:0,borderBottom:'none',borderRadius:0}} onClick={() => setAboutTab('project')}>📋 项目信息</button>
+              <button className={`btn-sm ${aboutTab==='disclaimer' ? 'btn-accent' : ''}`} style={{flex:1,borderBottomLeftRadius:0,borderBottomRightRadius:0,borderBottom:'none',borderRadius:0}} onClick={() => setAboutTab('disclaimer')}>⚖️ 免责声明</button>
+            </div>
+            {/* 项目信息 Tab */}
+            {aboutTab === 'project' && (
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',fontSize:'12px',color:'var(--text2)'}}>
+              <div style={{fontWeight:600,color:'var(--text)',marginBottom:8}}>🏢 团队</div>
+              <div style={{marginLeft:8,marginBottom:12}}>安宁亚蓝信息技术有限公司</div>
+              
+              <div style={{fontWeight:600,color:'var(--text)',marginBottom:8}}>💻 开发环境</div>
+              <div style={{marginLeft:8,marginBottom:12,lineHeight:1.6}}>
+                <div>• 用 Rust + TypeScript 代码开发</div>
+                <div>• 用 pnpm tauri build 构建</div>
+                <div>• 不依赖任何 AI 编程助手</div>
+              </div>
+              
+              <div style={{fontWeight:600,color:'var(--text)',marginBottom:8}}>🛠️ 技术栈</div>
+              <div style={{marginLeft:8,marginBottom:12,lineHeight:1.6}}>
+                <div>• 前端：React 19 + TypeScript + Vite</div>
+                <div>• 后端：Rust + Tauri v2</div>
+                <div>• 数据库：SQLite</div>
+              </div>
+              
+              <div style={{fontWeight:600,color:'var(--text)',marginBottom:8}}>📄 开源协议</div>
+              <div style={{marginLeft:8,marginBottom:12}}>MIT（即将开源）</div>
+              
+              <div style={{fontWeight:600,color:'var(--text)',marginBottom:8}}>🔗 联系方式</div>
+              <div style={{marginLeft:8,marginBottom:8,lineHeight:1.6}}>
+                <div>官网：<span style={{color:'var(--accent)',cursor:'pointer',textDecoration:'underline'}} onClick={() => window.open('https://agent.eake.cn/codexhub-cn/', '_blank')}>agent.eake.cn/codexhub-cn</span></div>
+                <div>邮箱：<span style={{color:'var(--accent)',cursor:'pointer',textDecoration:'underline'}} onClick={() => window.open('mailto:eakecn@qq.com', '_blank')}>eakecn@qq.com</span></div>
+              </div>
+            </div>
+            )}
+            {/* 免责声明 Tab */}
+            {aboutTab === 'disclaimer' && (
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',fontSize:'12px',color:'var(--text2)',lineHeight:1.7}}>
+              <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px',marginBottom:12}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:13}}>⚖️ 免责声明</div>
+                <div style={{color:'var(--text2)',lineHeight:1.8}}>
+                  <p style={{margin:'0 0 10px 0'}}>欢迎使用 <strong style={{color:'var(--text)'}}>GenHub</strong>（以下简称"本软件"）。在使用本软件前，请仔细阅读以下条款。继续使用即视为您已理解并同意本声明全部内容。</p>
+                  
+                  <p style={{margin:'0 0 8px 0',fontWeight:600,color:'var(--text)'}}>一、本软件性质</p>
+                  <p style={{margin:'0 0 10px 0'}}>本软件是一款<strong>开源、免费</strong>的 AI CLI 工具统一配置管理器，仅提供本地化的 API Key 配置管理和工具切换功能，本身<strong style={{color:'#e74c3c'}}>不提供、不分发、不托管</strong>任何 AI 模型服务，也不存储、上传您的任何账号凭证。</p>
+                  
+                  <p style={{margin:'0 0 8px 0',fontWeight:600,color:'var(--text)'}}>二、第三方服务免责</p>
+                  <p style={{margin:'0 0 10px 0'}}>本软件通过 API 调用第三方 AI 服务（Claude / Codex / Gemini / OpenClaw 等）。您通过本软件访问的第三方服务产生的一切后果（包括但不限于：内容生成、数据传输、费用支出、服务中断、账号风险等）均由您与第三方服务提供方自行承担，<strong>本软件及其开发者不承担任何责任</strong>。</p>
+                  
+                  <p style={{margin:'0 0 8px 0',fontWeight:600,color:'var(--text)'}}>三、AI 生成内容免责</p>
+                  <p style={{margin:'0 0 10px 0'}}>本软件仅作为交互界面，<strong>所有 AI 生成内容均由第三方模型返回</strong>，不代表本软件开发者立场。本软件不对 AI 生成内容的<strong>准确性、合法性、完整性、安全性</strong>作任何承诺或担保。</p>
+                  
+                  <p style={{margin:'0 0 8px 0',fontWeight:600,color:'var(--text)'}}>四、API Key 与数据安全</p>
+                  <p style={{margin:'0 0 10px 0'}}>您的 API Key<strong>仅保存在本地设备</strong>（SQLite 数据库 / 配置文件），开发者<strong>无任何途径获取</strong>。请妥善保管您的设备与 API Key，因设备丢失、密钥泄露导致的一切损失由您自行承担。</p>
+                  
+                  <p style={{margin:'0 0 8px 0',fontWeight:600,color:'var(--text)'}}>五、合规使用</p>
+                  <p style={{margin:'0 0 10px 0'}}>您应遵守所在国家/地区的法律法规以及第三方服务的用户协议。<strong>禁止</strong>将本软件用于任何违法违规活动。如因违规使用导致的一切法律后果，由您自行承担。</p>
+                  
+                  <p style={{margin:'0 0 8px 0',fontWeight:600,color:'var(--text)'}}>六、协议变更</p>
+                  <p style={{margin:'0 0 10px 0'}}>本免责声明可能随软件版本更新而修订，请以最新版本为准。</p>
+                  
+                  <p style={{margin:'12px 0 0 0',padding:'8px 10px',background:'var(--bg)',borderRadius:6,fontSize:11,color:'var(--text-dim)'}}>📅 最后更新：2026-07-13 · 版本 v0.1.6</p>
+                </div>
+              </div>
+            </div>
+            )}
+            {/* 底部版本与公司信息 */}
+            <div style={{marginTop:16,textAlign:'center',fontSize:11,color:'var(--text-dim)',lineHeight:1.8}}>
+              <div>版本 v0.1.6 · 更新日期 2026-07-13</div>
+              <div>亚蓝信息技术有限公司</div>
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => {
+                setAboutOpen(false);
+                // 如果未同意风险提示，重新打开
+                if (!localStorage.getItem('codexhub-risk-agreed')) {
+                  setRiskNoticeOpen(true);
+                }
+              }}>知道了</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📖 使用说明弹窗 */}
+      {guideOpen && (
+        <div className="overlay" onClick={() => setGuideOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:580,maxHeight:'80vh',overflowY:'auto'}}>
+            <h3>📖 使用说明</h3>
+            <div style={{display:'flex',flexDirection:'column',gap:16,margin:'12px 0',fontSize:13,color:'var(--text)',lineHeight:1.7}}>
+
+              {/* 步骤1 */}
+              <div style={{border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px',background:'var(--card)'}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:14}}>STEP 1 · 下载安装</div>
+                <div>① 下载 GenHub 安装包（exe 或 msi）</div>
+                <div>② 双击运行，按提示完成安装</div>
+                <div>③ 首次启动会检测是否已安装 6 款 CLI 工具</div>
+              </div>
+
+              {/* 步骤2 */}
+              <div style={{border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px',background:'var(--card)'}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:14}}>STEP 2 · 安装 AI 工具</div>
+                <div>如未检测到工具，点击左侧「工具」→「一键安装」</div>
+                <div>支持 Claude Code / Codex / Gemini CLI / Hermes Agent / OpenClaw / OpenCode</div>
+                <div>安装完成后自动识别，无需手动配置 PATH</div>
+              </div>
+
+              {/* 步骤3 */}
+              <div style={{border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px',background:'var(--card)'}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:14}}>STEP 3 · 配置 API Key</div>
+                <div>① 点击左侧「模型」→「一键配置」</div>
+                <div>② 选择一个 Provider（如 火山引擎 / NVIDIA / 硅基流动）</div>
+                <div>③ 填入对应的 API Key 和 Base URL，点击保存</div>
+                <div style={{marginTop:6,color:'var(--text-dim)',fontSize:12}}>💡 可同时配置多个 Provider，切换无忧</div>
+              </div>
+
+              {/* 步骤4 */}
+              <div style={{border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px',background:'var(--card)'}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:14}}>STEP 4 · 开始对话</div>
+                <div>① 点击左下角图标切换到想用的 AI 工具</div>
+                <div>② 点击「新建对话」，在主聊天区输入问题</div>
+                <div>③ AI 通过配置的 Provider API 响应，答案实时流式返回</div>
+              </div>
+
+              {/* 步骤5 */}
+              <div style={{border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px',background:'var(--card)'}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:14}}>STEP 5 · 切换模型</div>
+                <div>① 点击「模型」→「一键切换」</div>
+                <div>② 为每个工具单独指定使用的 Provider</div>
+                <div>③ 保存后立即生效，无需重启工具</div>
+              </div>
+
+              {/* 步骤6 */}
+              <div style={{border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px',background:'var(--card)'}}>
+                <div style={{fontWeight:700,color:'var(--accent)',marginBottom:8,fontSize:14}}>进阶功能</div>
+                <div>🧠 <b>记忆管理</b> — 持久化聊天历史，支持重命名/删除</div>
+                <div>🛠️ <b>技能市场</b> — 安装扩展技能，增强 AI 能力</div>
+                <div>🔧 <b>MCP 服务</b> — 管理 Model Context Protocol 服务器</div>
+                <div>💻 <b>终端管理</b> — 内嵌多工具命令行窗口</div>
+              </div>
+
+              {/* 底部提示 */}
+              <div style={{textAlign:'center',color:'var(--text-dim)',fontSize:12,marginTop:4,padding:'8px 0',borderTop:'1px solid var(--border)'}}>
+                遇到问题？点击左侧「反馈」告诉我们 · <span style={{color:'var(--accent)',cursor:'pointer'}} onClick={() => { setGuideOpen(false); setFeedbackOpen(true); }}>意见反馈</span>
+              </div>
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => setGuideOpen(false)}>我知道了</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💝 赞助我们弹窗 */}
+      {donateOpen && (
+        <div className="overlay" onClick={() => setDonateOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>💝 赞助我们</h3>
+            <div style={{textAlign:'center',margin:'16px 0',fontSize:'13px',color:'var(--text-dim)',lineHeight:'1.8'}}>
+              <div>如果 CodexHub 对你有帮助,</div>
+              <div>欢迎请作者喝一杯咖啡 ☕</div>
+            </div>
+            <div style={{display:'flex',justifyContent:'center',gap:'32px',margin:'20px 0'}}>
+              <div style={{textAlign:'center',width:200,height:200,background:'#fff',borderRadius:'8px',padding:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <img src={donateWechatImg} alt="微信支付" style={{maxWidth:'100%',maxHeight:'100%',width:'auto',height:'auto',objectFit:'contain'}} />
+              </div>
+              <div style={{textAlign:'center',width:200,height:200,background:'#fff',borderRadius:'8px',padding:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <img src={donateAlipayImg} alt="支付宝" style={{maxWidth:'100%',maxHeight:'100%',width:'auto',height:'auto',objectFit:'contain'}} />
+              </div>
+            </div>
+            <div style={{display:'flex',justifyContent:'center',gap:'48px',marginBottom:16}}>
+              <span style={{fontSize:'12px',color:'var(--text-dim)'}}>微信支付</span>
+              <span style={{fontSize:'12px',color:'var(--text-dim)'}}>支付宝</span>
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => setDonateOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🎨 外观切换弹窗 */}
+      {themeOpen && (
+        <div className="overlay" onClick={() => setThemeOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>🎨 外观设置</h3>
+            <div style={{margin:'16px 0'}}>
+              {[
+                { key:'system', label:'跟随系统', desc:'自动匹配 Windows 深色/浅色模式' },
+                { key:'dark', label:'深色模式', desc:'暗色赛博朋克风格' },
+                { key:'light', label:'浅色模式', desc:'明亮清新界面' },
+              ].map(opt => (
+                <div key={opt.key}
+                  className={`dropdown-item ${themeMode===opt.key ? 'active' : ''}`}
+                  onClick={() => {
+                    setThemeMode(opt.key as any);
+                    applyTheme(opt.key);
+                    localStorage.setItem('codexhub-theme', opt.key);
+                  }}
+                  style={{display:'flex',flexDirection:'column',alignItems:'flex-start',padding:'12px 16px',gap:4,cursor:'pointer',borderRadius:8,marginBottom:6,background:themeMode===opt.key?'rgba(0,240,255,0.08)':'transparent',border:themeMode===opt.key?'1px solid rgba(0,240,255,0.3)':'1px solid transparent'}}>
+                  <div style={{fontWeight:600}}>{opt.label}</div>
+                  <div style={{fontSize:11,color:'var(--text2)'}}>{opt.desc}</div>
+                </div>
+              ))}
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => setThemeOpen(false)}>确定</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔄 版本更新弹窗 */}
+      {updateOpen && (
+        <div className="overlay" onClick={() => setUpdateOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:520,maxHeight:'80vh',overflowY:'auto'}}>
+            <h3>🔄 版本更新</h3>
+
+            {/* 版本检测状态 */}
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:10,margin:'16px 0',padding:'16px 0',borderBottom:'1px solid var(--border)'}}>
+              {updateChecking ? (
+                <>
+                  <div style={{fontSize:32}}>⏳</div>
+                  <div style={{color:'var(--text)',fontSize:14}}>正在检测版本...</div>
+                </>
+              ) : (
+                <>
+                  <div style={{fontSize:28}}>{isUpdateAvailable ? '🆕' : '✅'}</div>
+                  <div style={{fontSize:14,color:'var(--text)'}}>当前版本: {currentVersion}</div>
+                  {latestVersion && (
+                    <div style={{fontSize:13,color:isUpdateAvailable ? 'var(--accent)' : 'var(--text-dim)',marginTop:2}}>
+                      最新版本: {latestVersion}
+                    </div>
+                  )}
+                  {!latestVersion && !updateChecking && (
+                    <div style={{fontSize:13,color:'var(--text-dim)',marginTop:2}}>检测失败</div>
+                  )}
+                </>
+              )}
+              {/* 下载进度条 */}
+              {downloadProgress && (
+                <div style={{margin:'8px 0',width:'100%'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>
+                    <span>{downloadProgress.status === 'installing' ? '正在安装...' : downloadProgress.status === 'restarting' ? '即将重启...' : '正在下载...'}</span>
+                    <span>{downloadProgress.progress}%</span>
+                  </div>
+                  <div style={{width:'100%',height:8,background:'var(--border)',borderRadius:4,overflow:'hidden'}}>
+                    <div style={{width: `${downloadProgress.progress}%`, height:'100%', background: downloadProgress.error ? '#f87171' : 'linear-gradient(90deg, #00f0ff, #a855f7)', transition:'width 0.3s'}} />
+                  </div>
+                  {downloadProgress.error && (
+                    <div style={{fontSize:11,color:'#f87171',marginTop:4}}>{downloadProgress.error}</div>
+                  )}
+                  {downloadProgress.total > 0 && !downloadProgress.error && (
+                    <div style={{fontSize:10,color:'var(--text-dim)',marginTop:4}}>
+                      {Math.round(downloadProgress.downloaded/1024/1024*10)/10} MB / {Math.round(downloadProgress.total/1024/1024*10)/10} MB
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* 按钮区 */}
+              <div style={{display:'flex',gap:8,marginTop:12}}>
+                {!updateChecking && isUpdateAvailable && !downloadProgress && (
+                  <button className="btn-accent" onClick={handleDownloadUpdate}>下载更新</button>
+                )}
+                {!updateChecking && !isUpdateAvailable && !downloadProgress && (
+                  <span style={{fontSize:13,color:'var(--text-dim)',padding:'8px 0'}}>✅ 已是最新版本</span>
+                )}
+                <button className="btn-sm" onClick={() => checkVersion()} disabled={updateChecking}>检测更新</button>
+                <button className="btn-sm" onClick={() => { setUpdateOpen(false); setDownloadProgress(null); }}>关闭</button>
+              </div>
+            </div>
+
+            {/* 更新日志 */}
+            <div style={{margin:'8px 0'}}>
+              <h4 style={{fontSize:13,color:'var(--accent)',marginBottom:8,fontWeight:600}}>📋 更新日志</h4>
+              <div style={{fontSize:12,color:'var(--text2)',lineHeight:1.8}}>
+                                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.6</div>
+                  <div>• 品牌升级为 GenHub（原 CodexHub CN）</div>
+                  <div>• 平台账号登录 / 注册（聊天记录本地持久化）</div>
+                  <div>• 多 Agent 协作（主 Agent 派发子任务 + 汇总）</div>
+                  <div>• 自然语言定时任务（对话建任务自动执行）</div>
+                  <div>• 沙箱代码运行（Python / JS / Shell）</div>
+                  <div>• 所有弹窗支持拖动</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.5</div>
+                  <div>• 品牌更名 GenHub，统一图标与配色</div>
+                  <div>• 登录认证与用户体系</div>
+                  <div>• 截图增强（自由选区 / 窗口识别 / 工具栏跟随）</div>
+                  <div>• 模型库详情页更新</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.4</div>
+                  <div>• 三屏布局与文件树</div>
+                  <div>• Git 操作面板</div>
+                  <div>• 全屏模式</div>
+                  <div>• 全面中文化</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.3</div>
+                  <div>• Code Runner 多语言执行 + stdin</div>
+                  <div>• 模型 combobox 与版本动态获取</div>
+                  <div>• Grok Build 集成</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.2</div>
+                  <div>• 本地反向代理网关（API Key 注入）</div>
+                  <div>• 公告系统</div>
+                  <div>• 使用手册清理</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.1</div>
+                  <div>• 截图功能（自由选区 + canvas 裁剪 + 工具栏）</div>
+                  <div>• 文件附件（图片 / 文本上传 + 缩略图）</div>
+                  <div>• 技能市场重构（用户上传 / 出厂内置）</div>
+                  <div>• 技能调用：5秒去重 + tools 字段流式解析 + 对话框高亮</div>
+                  <div>• Token 账本（费用 / 余额 / 趋势）</div>
+                  <div>• 清理存储空间</div>
+                  <div>• 修复 dist 目录同步（vite 与 Tauri 读取路径不一致）</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.1.0</div>
+                  <div>• 新增 eaKe API 统一中转（推荐）</div>
+                  <div>• 技能市场（313 个技能，WordPress API）</div>
+                  <div>• Agent 管理（版本检测/一键升级/诊断冲突）</div>
+                  <div>• MCP 管理（21 个预设服务）</div>
+                  <div>• NSIS 中文卸载界面</div>
+                  <div>• 一键安装弹窗 + 已安装工具卸载</div>
+                  <div>• Provider 申请 API Key 链接全覆盖</div>
+                  <div>• 6 个工具专属彩色 SVG 图标</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.9</div>
+                  <div>• 修复了已知 BUG，增强可用性（过渡版本）</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.8</div>
+                  <div>• 修复了已知 BUG，增强可用性（过渡版本）</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.7</div>
+                  <div>• 修复了已知 BUG，增强可用性（过渡版本）</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.6</div>
+                  <div>• 修复了已知 BUG，增强可用性（过渡版本）</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.5</div>
+                  <div>• 修复了已知 BUG，增强可用性（过渡版本）</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.4</div>
+                  <div>• 内嵌终端管理（6 个 AI CLI 工具）</div>
+                  <div>• 终端切换视图自动重连</div>
+                  <div>• 浅色/深色主题切换优化</div>
+                  <div>• 数据导入/导出功能</div>
+                  <div>• 启动 Splash 屏幕优化</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.3</div>
+                  <div>• 流式聊天界面（SSE）</div>
+                  <div>• 52px 图标轨道 UI 布局</div>
+                  <div>• 会话管理 & 历史记录</div>
+                  <div>• 自动版本检测 & 更新</div>
+                  <div>• 系统托盘 + 单例运行</div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.2</div>
+                  <div>• 18 个 Provider 一键切换</div>
+                  <div>• 6 个 CLI 工具检测与安装</div>
+                  <div>• MCP 服务管理</div>
+                  <div>• 用量统计与告警</div>
+                  <div>• 配置模板系统</div>
+                </div>
+                <div>
+                  <div style={{color:'var(--text)',fontWeight:500}}>v0.0.1</div>
+                  <div>• 项目初始化与基础架构</div>
+                  <div>• 单工具聊天框架搭建</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 更新日志标题 */}
+            <div style={{margin:'12px 0 8px 0',paddingTop:12,borderTop:'1px solid var(--border)'}}>
+              <h4 style={{fontSize:13,color:'var(--accent)',fontWeight:600}}>📋 更新日志</h4>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💬 意见反馈弹窗 */}
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
+
+      {/* 🧩 技能市场弹窗 */}
+      {skillsModalOpen && (
+        <div className="overlay" onClick={() => setSkillsModalOpen(false)}>
+          <div className="modal-box modal-lg" onClick={e => e.stopPropagation()} style={{maxWidth:1000,maxHeight:'85vh',overflow:'auto'}}>
+            <div className="modal-header">
+              <h3>🧩 技能市场</h3>
+            </div>
+            <SkillsPanel toolId={activeTool} onClose={() => setActiveView('chat')} onToast={showToast} />
+          </div>
+        </div>
+      )}
+
+      {/* 📦 内置技能弹窗 */}
+      {bundledSkillsOpen && (
+        <div style={{
+          position:'fixed',left:0,top:0,width:'100vw',height:'100vh',
+          background:'rgba(0,0,0,0.8)',
+          zIndex:9990,
+          overflow:'auto'
+        }} onClick={() => setBundledSkillsOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            position:'relative',top:'50%',transform:'translateY(-50%)',
+            margin:'0 auto',
+            background:'#111119',
+            border:'1px solid #333',
+            borderRadius:14,
+            padding:24,
+            maxWidth:800,
+            boxShadow:'0 16px 48px rgba(0,0,0,0.6)',
+            color:'#e0e0e0'
+          }}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,padding:'0 2px',borderBottom:'1px solid #333'}}>
+              <h3 style={{margin:0,color:'#e0e0e0',fontSize:16,fontWeight:700}}>📦 内置技能 (11)</h3>
+              <button onClick={() => setBundledSkillsOpen(false)} style={{background:'transparent',border:'none',color:'#888',fontSize:18,cursor:'pointer',padding:'2px 8px',lineHeight:1}}>✕</button>
+            </div>
+            <BundledSkillsPanel toolId={activeTool} onClose={() => setBundledSkillsOpen(false)} onToast={showToast} onSkillInvoked={() => setBundledSkillsOpen(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* 🔌 MCP 配置弹窗 */}
+      {mcpModalOpen && (
+        <div className="overlay" onClick={() => setMcpModalOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:680,maxHeight:'80vh',overflow:'auto'}}>
+            <h3>🔌 MCP 配置</h3>
+            <p style={{fontSize:13,color:'var(--text2)',marginBottom:16}}>管理 Model Context Protocol 服务器,为 AI 工具提供外部能力扩展</p>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {[
+                {name:'filesystem',desc:'本地文件系统读写',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-filesystem C:/Users',icon:'📁'},
+                {name:'fetch',desc:'网页抓取与内容提取',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-fetch',icon:'🌐'},
+                {name:'github',desc:'GitHub 仓库操作(Issue/PR/Code)',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-github',icon:'🐙'},
+                {name:'brave-search',desc:'Brave 网页搜索 API',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-brave-search',icon:'🔍'},
+                {name:'memory',desc:'知识图谱记忆服务',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-memory',icon:'🧠'},
+                {name:'slack',desc:'Slack 消息集成',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-slack',icon:'💬'},
+                {name:'postgres',desc:'PostgreSQL 数据库查询',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-postgres',icon:'🐘'},
+                {name:'puppeteer',desc:'浏览器自动化(截图/交互)',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-puppeteer',icon:'🎭'},
+                {name:'sequential-thinking',desc:'链式推理思考增强',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-sequential-thinking',icon:'🧮'},
+                {name:'everything',desc:'Windows 本地文件极速搜索',transport:'stdio',cmd:'npx',args:'-y @modelcontextprotocol/server-everything',icon:'⚡'},
+              ].map(s => (
+                <div key={s.name} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg3)'}}>
+                  <span style={{fontSize:22}}>{s.icon}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:600,fontSize:13}}>{s.name}</div>
+                    <div style={{fontSize:11,color:'var(--text2)'}}>{s.desc}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginTop:2,fontFamily:'monospace'}}>{s.cmd} {s.args}</div>
+                  </div>
+                  <span style={{fontSize:11,padding:'3px 8px',borderRadius:4,background:'rgba(0,240,255,0.1)',color:'var(--accent)'}}>{s.transport}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{textAlign:'right',marginTop:16}}>
+              <button className="btn" onClick={() => setMcpModalOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🏪 供应商管理弹窗(合并:列表+添加) */}
+      {providerModalOpen && (
+        <div className="overlay" onClick={() => setProviderModalOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:720,maxHeight:'85vh',overflow:'auto'}}>
+            <h3>🏪 供应商管理</h3>
+            <p style={{fontSize:13,color:'var(--text2)',marginBottom:16}}>管理 API 供应商配置,一键切换不同模型提供商</p>
+
+            {/* 已配置供应商列表 */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:'var(--cyan)'}}>📋 已配置供应商 ({providers.length})</div>
+              {providers.length === 0 ? (
+                <div style={{padding:20,textAlign:'center',color:'var(--text2)',background:'var(--bg2)',borderRadius:8}}>
+                  暂无供应商,请添加
+                </div>
+              ) : (
+                <div style={{maxHeight:280,overflowY:'auto',display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                  {providers.map(p => {
+                    const hasKey = !!p.api_key;
+                    const isActive = tools.some(t => t.active_provider_id === p.id);
+                    return (
+                      <div key={p.id} style={{
+                        padding:'10px 12px',
+                        borderRadius:8,
+                        border:`1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
+                        background:isActive ? 'rgba(0,240,255,0.05)' : 'var(--card)',
+                        display:'flex',
+                        alignItems:'center',
+                        gap:10
+                      }}>
+                        <span style={{fontSize:20}}>{PROVIDER_LOGOS[p.id] || p.icon}</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
+                          <div style={{fontSize:10,color:'var(--text2)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            {p.base_url}
+                          </div>
+                          <div style={{fontSize:11,marginTop:4}}>
+                            {hasKey ? <span style={{color:'#4ade80'}}>✓ 已配置Key</span> : <span style={{color:'#f87171'}}>✗ 未配置Key</span>}
+                            {isActive && <span style={{marginLeft:8,color:'var(--accent)'}}>● 使用中</span>}
+                          </div>
+                        </div>
+                        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                          <button className="btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={() => { setKeyFor(p.id); setKeyVal(p.api_key || ''); setProviderModalOpen(false); }}>🔑</button>
+                          {p.category !== 'domestic' && (
+                            <button className="btn-sm" style={{fontSize:10,padding:'3px 8px',color:'#f87171'}} onClick={async () => { await delProv(p.id); setToast('已删除 '+p.name); }}>🗑</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 添加新供应商 */}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>➕ 添加新供应商</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                <div className="field"><label>ID</label><input placeholder="my-provider" value={newP.id} onChange={e => setNewP({...newP,id:e.target.value})} style={inp} /></div>
+                <div className="field"><label>名称</label><input placeholder="我的模型" value={newP.name} onChange={e => setNewP({...newP,name:e.target.value})} style={inp} /></div>
+                <div className="field" style={{gridColumn:'1/-1'}}><label>Base URL</label><input placeholder="https://api.example.com/v1" value={newP.base_url} onChange={e => setNewP({...newP,base_url:e.target.value})} style={inp} /></div>
+                <div className="field"><label>图标 emoji</label><input placeholder="🟢" value={newP.icon} onChange={e => setNewP({...newP,icon:e.target.value})} style={inp} /></div>
+                <div className="field">
+                  <label>分类</label>
+                  <select value={newP.category} onChange={e => setNewP({...newP,category:e.target.value})} style={inp}>
+                    <option value="domestic">国内模型</option>
+                    <option value="overseas">海外模型</option>
+                    <option value="relay">中转服务</option>
+                    <option value="official">官方</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{marginTop:12,textAlign:'right'}}>
+                <button className="btn-accent" onClick={async () => {
+                  if (!newP.id.trim() || !newP.name.trim() || !newP.base_url.trim()) {
+                    setToast('请填写完整信息');
+                    return;
+                  }
+                  await addProv();
+                  setToast('✅ 已添加 '+newP.name);
+                }}>添加供应商</button>
+              </div>
+            </div>
+
+            <div style={{textAlign:'right',marginTop:16,borderTop:'1px solid var(--border)',paddingTop:12}}>
+              <button className="btn" onClick={() => setProviderModalOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📥 缓存清理弹窗 */}
+      {cacheCleanOpen && (
+        <div className="overlay" onClick={() => setCacheCleanOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>🧹 缓存清理</h3>
+            <div style={{display:'flex',flexDirection:'row',gap:10,margin:'16px 0'}}>
+              <button
+                className="btn-sm"
+                style={{borderColor:'#ff6b6b',color:'#ff6b6b',flex:1,padding:'10px 0'}}
+                onClick={async () => {
+                  if (!confirm('确定要清除所有缓存数据吗？操作不可逆。')) return;
+                  try {
+                    await invoke('clear_all_cache');
+                    showToast('✅ 缓存已清除');
+                    await loadData();
+                  } catch (e: any) {
+                    showToast('❌ 清除失败: ' + (e?.message || e));
+                  }
+                }}
+              >
+                🗑️ 清除缓存
+              </button>
+              <button
+                className="btn-sm"
+                style={{borderColor:'#e67e22',color:'#e67e22',flex:1,padding:'10px 0'}}
+                onClick={async () => {
+                  if (!confirm('将清理 QClaw session 缓存中的残留文件和旧 checkpoint。确定继续？')) return;
+                  try {
+                    const result = await invoke('cleanup_sessions_cache', { keepCheckpoints: 1 }) as any;
+                    const fmtBytes = (bytes: number) => {
+                      if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+                      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+                      if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                      return bytes + ' B';
+                    };
+                    showToast(`✅ 清理完成：删了 ${result.deleted_files} 个文件，释放 ${fmtBytes(result.freed_bytes)}`);
+                  } catch (e: any) {
+                    showToast('❌ 清理失败: ' + (e?.message || e));
+                  }
+                }}
+              >
+                🧹 清理存储空间
+              </button>
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => setCacheCleanOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📥 数据管理弹窗 */}
+      {dataOpen && (
+        <div className="overlay" onClick={() => setDataOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>📥 数据管理</h3>
+            <div style={{display:'flex',flexDirection:'column',gap:10,margin:'16px 0'}}>
+              <div className="dropdown-item" onClick={() => { exportCfg(); setDataOpen(false); }}>
+                1. 导出数据
+              </div>
+              <div className="dropdown-item" onClick={() => (document.getElementById('import-file-input') as HTMLInputElement)?.click()}>
+                2. 导入数据
+              </div>
+              <input
+                id="import-file-input"
+                type="file"
+                accept=".json"
+                style={{display:'none'}}
+                onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  showToast('调试: 开始导入 ' + file.name);
+                  const text = await file.text();
+                  try {
+                    const data = JSON.parse(text);
+                    showToast('调试: JSON 解析成功, 开始调用后端...');
+                    const result = await invoke('import_all_configs', { data, merge: true }) as any;
+                    showToast(result.message || '✅ 导入成功');
+                    await loadData();
+                    if (dataOpen) loadMcp();
+                  } catch (err: any) {
+                    showToast('❌ 导入失败: ' + (err?.message || err));
+                  }
+                  setDataOpen(false);
+                }}
+              />
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => setDataOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔌 MCP 管理弹窗 */}
+      {mcpOpen && (
+        <div className="overlay" onClick={() => setMcpOpen(false)}>
+          <div className="modal-box modal-lg" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🔌 MCP 管理</h3>
+            </div>
+            <div className="modal-body">
+              {/* 📋 我的服务器 */}
+              <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'var(--cyan)'}}>📋 我的服务器 <span style={{fontSize:10,color:'var(--text2)'}}>({mcpServers.length})</span></div>
+              <div style={{display:'flex',gap:6,marginBottom:8}}>
+                <button className="btn-sm btn-accent" onClick={async () => { try { const r = await invoke('start_all_mcp') as string; setMcpFeedback({msg:r, ok:true}); } catch(e:any){ setMcpFeedback({msg:e.toString(), ok:false}); } loadMcp(); }}>▶ 全部启动</button>
+                <button className="btn-sm" style={{color:'#f87171'}} onClick={async () => { try { const r = await invoke('stop_all_mcp') as string; setMcpFeedback({msg:r, ok:true}); } catch(e:any){ setMcpFeedback({msg:e.toString(), ok:false}); } loadMcp(); }}>⏹ 全部停止</button>
+              </div>
+              {mcpServers.length === 0 ? (
+                <div style={{color:'var(--text2)',fontSize:13,padding:12,marginBottom:8,background:'var(--bg2)',borderRadius:8}}>暂无 MCP 服务器,请从下方预设添加</div>
+              ) : (
+                <div style={{maxHeight:160,overflowY:'auto',marginBottom:16}}>
+                  {mcpServers.map(s => (
+                    <div key={s.id} style={{background:'var(--card)',borderRadius:8,padding:'8px 12px',marginBottom:6,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <div>
+                        <div style={{fontWeight:600,fontSize:12}}>
+                          {s.name} 
+                          <span style={{fontSize:10,color:'var(--cyan)'}}>{s.transport}</span>
+                          {s.running && <span style={{fontSize:10,color:'#10b981',marginLeft:4}}>●运行中</span>}
+                        </div>
+                        <div style={{fontSize:10,color:'var(--text2)',marginTop:1}}>{s.command || s.url || ''}</div>
+                      </div>
+                      <div style={{display:'flex',gap:4}}>
+                        {s.transport === 'stdio' && (
+                          s.running ? (
+                            <button className="btn-sm" style={{fontSize:11,padding:'2px 8px',color:'#f87171'}} onClick={async () => { 
+                              try { const r = await invoke('stop_mcp_server', { id: s.id }) as string; setMcpFeedback({msg:r, ok:true}); } catch(e:any){ setMcpFeedback({msg:e.toString(), ok:false}); }
+                              loadMcp();
+                            }}>⏹ 停止</button>
+                          ) : (
+                            <button className="btn-sm btn-accent" style={{fontSize:11,padding:'2px 8px'}} onClick={async () => { 
+                              try { const r = await invoke('start_mcp_server', { id: s.id }) as string; setMcpFeedback({msg:r, ok:true}); } catch(e:any){ setMcpFeedback({msg:e.toString(), ok:false}); }
+                              loadMcp();
+                            }}>▶ 启动</button>
+                          )
+                        )}
+                        <button className="btn-sm" style={{fontSize:11,padding:'2px 8px'}} onClick={() => { setMcpEditing(s); }}>编辑</button>
+                        <button className="btn-sm" style={{color:'#f87171',fontSize:11,padding:'2px 8px'}} onClick={async () => { await invoke('delete_mcp_server', { id: s.id }); setMcpFeedback({msg:'已删除 '+s.name, ok:true}); loadMcp(); }}>删除</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 反馈 Banner */}
+              {mcpFeedback && (
+                <div style={{marginBottom:12,padding:'8px 12px',background:mcpFeedback.ok ? 'rgba(0,240,255,0.08)' : 'rgba(248,113,113,0.08)',border:'1px solid '+mcpFeedback.ok ? 'rgba(0,240,255,0.3)' : 'rgba(248,113,113,0.3)',borderRadius:8,fontSize:12,color:mcpFeedback.ok ? 'var(--cyan)' : '#f87171'}}>
+                  {mcpFeedback.msg}
+                </div>
+              )}
+              {/* 编辑/添加表单（独立于 tab，随时可见） */}
+              {mcpEditing && (
+                <div style={{marginBottom:12,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                  <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>{mcpEditing.id ? '✏️ 编辑 MCP 服务器' : '➕ 添加 MCP 服务器'}</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    <input placeholder="名称" value={mcpEditing.name} onChange={e => setMcpEditing({...mcpEditing, name: e.target.value})} style={inp} />
+                    <select value={mcpEditing.transport} onChange={e => setMcpEditing({...mcpEditing, transport: e.target.value})} style={inp}>
+                      <option value="stdio">stdio</option>
+                      <option value="sse">sse</option>
+                      <option value="http">http</option>
+                    </select>
+                    {mcpEditing.transport === 'stdio' ? (
+                      <><input placeholder="命令" value={mcpEditing.command||''} onChange={e => setMcpEditing({...mcpEditing, command: e.target.value})} style={inp} />
+                      <input placeholder="参数 JSON 数组" value={mcpEditing.args||''} onChange={e => setMcpEditing({...mcpEditing, args: e.target.value})} style={inp} /></>
+                    ) : (
+                      <input placeholder="URL" value={mcpEditing.url||''} onChange={e => setMcpEditing({...mcpEditing, url: e.target.value})} style={{...inp,gridColumn:'1/-1'}} />
+                    )}
+                    <input placeholder="环境变量 JSON" value={mcpEditing.env||''} onChange={e => setMcpEditing({...mcpEditing, env: e.target.value})} style={{...inp,gridColumn:'1/-1'}} />
+                  </div>
+                  <div style={{marginTop:8,display:'flex',gap:8}}>
+                    <button className="btn-accent" onClick={async () => {
+                      if (mcpEditing.id) {
+                        await invoke('update_mcp_server', { server: mcpEditing });
+                      } else {
+                        await invoke('add_mcp_server', { server: { ...mcpEditing, id: mcpEditing.name.toLowerCase().replace(/\s+/g,''), enabled: true, created_at: '', updated_at: '' } });
+                      }
+                      setMcpEditing(null); loadMcp();
+                    }}>💾 保存</button>
+                    <button className="btn-sm" onClick={() => setMcpEditing(null)}>取消</button>
+                  </div>
+                </div>
+              )}
+              {/* 📦 预设模板 / 🔍 在线发现 */}
+              <div style={{borderTop:'1px solid var(--border)',paddingTop:12}}>
+                {/* Tab 切换 */}
+                <div style={{display:'flex',gap:0,marginBottom:12,borderBottom:'1px solid var(--border)'}}>
+                  <button className={`btn-sm ${mcpTab==='presets' ? 'btn-accent' : ''}`} style={{borderBottomLeftRadius:0,borderBottomRightRadius:0,borderBottom:'none'}} onClick={() => setMcpTab('presets')}>📦 预设模板</button>
+                  <button className={`btn-sm ${mcpTab==='discover' ? 'btn-accent' : ''}`} style={{borderBottomLeftRadius:0,borderBottomRightRadius:0,borderBottom:'none'}} onClick={() => setMcpTab('discover')}>🔍 在线发现</button>
+                </div>
+                {/* 预设模板 Tab */}
+                {mcpTab === 'presets' && (
+                  <>
+                    <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'var(--cyan)'}}>📦 预设模板 <span style={{fontSize:10,color:'var(--text2)'}}>({MCP_PRESETS.length} 个)</span></div>
+                    <div className="skill-grid">
+                      {MCP_PRESETS.map(p => (
+                        <div key={p.id} className="skill-card" style={{position:'relative'}}>
+                          <div className="skill-card-name">{p.name}</div>
+                          <div className="skill-card-desc">{p.category} · {p.command}</div>
+                          {p.desc && <div style={{fontSize:10,color:'var(--text2)',marginTop:2}}>{p.desc}</div>}
+                          <button className="btn-sm btn-accent" style={{marginTop:6,width:'100%',fontSize:11}} onClick={async (e) => {
+                            e.stopPropagation();
+                            await invoke('add_mcp_server', { server: { ...p, id: p.id, enabled: true, created_at: '', updated_at: '' } });
+                            loadMcp();
+                            setMcpFeedback({msg:'✅ 已添加 '+p.name, ok:true});
+                          }}>+ 添加到服务器列表</button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {/* 在线发现 Tab */}
+                {mcpTab === 'discover' && (
+                  <>
+                    <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'var(--cyan)'}}>🔍 在线发现 <span style={{fontSize:10,color:'var(--text2)'}}>(GitHub API)</span></div>
+                    {/* 搜索栏 */}
+                    <div style={{display:'flex',gap:6,marginBottom:12}}>
+                      <input placeholder="搜索 MCP server（如：database, search, git...）" value={mcpSearch} onChange={e => setMcpSearch(e.target.value)} onKeyDown={async e => {
+                        if (e.key === 'Enter' && mcpSearch.trim()) {
+                          setMcpDiscoverLoading(true);
+                          setMcpDiscoverPage(1);
+                          try {
+                            const q = encodeURIComponent(mcpSearch.trim() + ' mcp server');
+                            const res = await fetch(`https://api.github.com/search/repositories?q=${q}&sort=stars&order=desc&per_page=20&page=1`);
+                            const data = await res.json();
+                            setMcpDiscoverResults(data.items || []);
+                          } catch (err: any) {
+                            showToast('搜索失败: ' + err.message);
+                          }
+                          setMcpDiscoverLoading(false);
+                        }
+                      }} style={{flex:1,...inp}} />
+                      <button className="btn-accent btn-sm" onClick={async () => {
+                        if (!mcpSearch.trim()) return;
+                        setMcpDiscoverLoading(true);
+                        setMcpDiscoverPage(1);
+                        try {
+                          const q = encodeURIComponent(mcpSearch.trim() + ' mcp server');
+                          const res = await fetch(`https://api.github.com/search/repositories?q=${q}&sort=stars&order=desc&per_page=20&page=1`);
+                          const data = await res.json();
+                          setMcpDiscoverResults(data.items || []);
+                        } catch (err: any) {
+                          showToast('搜索失败: ' + err.message);
+                        }
+                        setMcpDiscoverLoading(false);
+                      }}>🔍 搜索</button>
+                    </div>
+                    {/* 搜索结果 */}
+                    {mcpDiscoverLoading ? (
+                      <div style={{textAlign:'center',padding:20,color:'var(--text2)'}}>搜索中...</div>
+                    ) : mcpDiscoverResults.length === 0 ? (
+                      <div style={{textAlign:'center',padding:20,color:'var(--text2)'}}>输入关键词搜索 GitHub 上的 MCP server</div>
+                    ) : (
+                      <div style={{maxHeight:240,overflowY:'auto'}}>
+                        {mcpDiscoverResults.map((repo: any) => (
+                          <div key={repo.id} style={{background:'var(--card)',borderRadius:8,padding:'10px 14px',marginBottom:6}}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <a href={repo.html_url} target="_blank" rel="noopener noreferrer" style={{color:'var(--cyan)',fontWeight:600,fontSize:13,textDecoration:'none',wordBreak:'break-all'}}>{repo.full_name}</a>
+                                <div style={{fontSize:11,color:'var(--text2)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{repo.description || '无描述'}</div>
+                                <div style={{fontSize:10,color:'var(--text2)',marginTop:4}}>
+                                  ⭐ {repo.stargazers_count.toLocaleString()} · 📅 {new Date(repo.pushed_at).toLocaleDateString()}
+                                </div>
+                              </div>
+                              <button className="btn-sm btn-accent" style={{whiteSpace:'nowrap'}} onClick={() => {
+                                const parts = repo.full_name.split('/');
+                                const author = parts[0];
+                                const name = parts[1];
+                                setMcpEditing({
+                                  id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+                                  name: name,
+                                  transport: 'stdio',
+                                  command: 'npx',
+                                  args: JSON.stringify(['-y', `@${author}/${name}`]),
+                                  url: '',
+                                  env: '',
+                                  headers: '',
+                                });
+                              }}>+ 添加</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="modal-btns">
+              <button className="btn-accent" onClick={() => setMcpEditing({id:'',name:'',transport:'stdio',command:'',args:'',url:'',env:'',headers:''})}>+ 手动添加</button>
+              <button className="btn-sm" onClick={() => setMcpOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 启动台弹窗 */}
+      {agentOpen && (
+        <div className="overlay" onClick={() => setAgentOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>🚀 Agent 启动台</h3>
+            <div style={{margin:'12px 0'}}>
+              <div className="skill-grid">
+                {tools?.map(t => {
+                  const d = detectResults?.find(r => r.tool_id === t.id);
+                  const isInstalled = d?.installed ?? false;
+                  const prov = providers?.find(p => p.id === t.active_provider_id);
+                  return (
+                    <div key={t.id} className={`skill-card ${isInstalled ? '' : 'missing'}`}>
+                      <div className="skill-card-header">
+                        <div className="skill-card-name">{t.name}</div>
+                        <span className={`skill-badge ${isInstalled ? 'ok' : 'no'}`}>{isInstalled ? '✓ 已安装' : '✗ 未安装'}</span>
+                      </div>
+                      <div className="skill-card-desc">当前: {prov?.name || '未选择供应商'}</div>
+                      <div className="skill-card-footer">
+                        {isInstalled ? (
+                          <button className="btn-accent btn-sm" onClick={async () => {
+                            setAgentOpen(false);
+                            setTerminalTool(t.id);
+                          }}>▶ 启动</button>
+                        ) : (
+                          <button className="btn-sm" onClick={() => { setActiveTool(t.id); setAgentOpen(false); }}>⬇ 前往下载</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📊 总览弹窗 */}
+      {dashboardOpen && (
+        <div className="overlay" onClick={() => setDashboardOpen(false)}>
+          <div className="modal-box modal-lg" onClick={e => e.stopPropagation()}>
+            <h3>📊 配置总览</h3>
+            <div style={{margin:'12px 0',maxHeight:'70vh',overflowY:'auto'}}>
+              <div className="dash-grid">
+                {tools?.map(t => {
+                  const d = detectResults?.find(r => r.tool_id === t.id);
+                  const prov = providers?.find(p => p.id === t.active_provider_id);
+                  return (
+                    <div key={t.id} className={`dash-card ${d?.installed ? 'installed' : 'missing'}`} onClick={() => { setActiveTool(t.id); setDashboardOpen(false); }}>
+                      <div className="dash-header">
+                        <div className="dash-name">{t.name}</div>
+                        {d?.installed ? <span className="dash-status ok">✓</span> : <span className="dash-status no">✗</span>}
+                      </div>
+                      <div className="dash-body">
+                        <div className="dash-row"><span className="dash-label">供应商</span><span className="dash-value">{prov?.name || '-'}</span></div>
+                        <div className="dash-row"><span className="dash-label">API Key</span><span className={`dash-value ${prov?.api_key ? 'ok' : 'no'}`}>{prov?.api_key ? '✓ 已配置' : '✗ 未配置'}</span></div>
+                        <div className="dash-row"><span className="dash-label">配置</span><span className="dash-value" style={{fontSize:10}}>{d?.config_dir || '-'}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{marginTop:12,fontSize:11,color:'var(--text2)'}}>💡 点击卡片进入对应工具的 Provider 切换面板</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {terminalTool && (
+        <Terminal
+          toolId={terminalTool}
+          toolName={tools.find(t => t.id === terminalTool)?.name || terminalTool}
+          onClose={() => setTerminalTool(null)}
+        />
+      )}
+      {/* 浮窗由 Rust log_skill_invoke 创建子窗口渲染 */}
+      {toast && createPortal(
+        <div className="toast">{toast}</div>,
+        document.body
+      )}
+
+      {/* ── 一键配置弹窗 ── */}
+      {quickConfigOpen && (
+        <div className="overlay" onClick={() => setQuickConfigOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:560}}>
+            <h3>⚡ 一键配置</h3>
+            <div style={{marginBottom:12,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+              <button
+                disabled={fetchingAllModels}
+                onClick={async () => {
+                  setFetchingAllModels(true);
+                  try {
+                    const results = await invoke('fetch_all_provider_models') as any[];
+                    let ok = 0, fail = 0;
+                    const updated: Record<string, ModelCapability[]> = {};
+                    for (const r of results) {
+                      if (r.success && r.models.length > 0) {
+                        ok++;
+                        updated[r.provider_id] = r.models;
+                      } else {
+                        fail++;
+                      }
+                    }
+                    if (ok > 0) setProviderModels(prev => ({...prev, ...updated}));
+                    showToast(`模型拉取完成：${ok} 个成功${fail > 0 ? `，${fail} 个失败` : ''}`);
+                  } catch(e: any) {
+                    showToast('拉取失败: ' + (e?.message || e));
+                  } finally {
+                    setFetchingAllModels(false);
+                  }
+                }}
+                style={{background: fetchingAllModels ? 'var(--card)' : 'linear-gradient(90deg,#00f0ff,#a855f7)', border:'none', color: fetchingAllModels ? 'var(--text2)' : '#000', padding:'6px 16px', borderRadius:6, cursor: fetchingAllModels ? 'not-allowed' : 'pointer', fontSize:13, fontWeight:600}}>
+                {fetchingAllModels ? '⏳ 拉取中...' : '🚀 一键拉取所有模型'}
+              </button>
+              <span style={{fontSize:11,color:'var(--text2)'}}>遍历所有已配置 API Key 的 Provider，自动拉取模型列表</span>
+            </div>
+            <div style={{margin:'12px 0',maxHeight:'60vh',overflowY:'auto'}}>
+              {qcProviders.length === 0 && (
+                <div style={{padding:20,textAlign:'center',color:'var(--text2)'}}>暂无供应商，请在「供应商」中添加</div>
+              )}
+              {qcProviders.map(p => (
+                <div key={p.id} style={{marginBottom:16,padding:'12px',background:'var(--bg2)',borderRadius:8,border:'1px solid var(--border)'}}>
+                  <div style={{fontWeight:600,marginBottom:8,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <span>{p.icon}</span> {p.name}
+                      {p.api_key && <span style={{fontSize:11,color:'var(--cyan)',background:'var(--card)',padding:'1px 6px',borderRadius:4}}>✓ 已配置</span>}
+                    </div>
+                    {/* 厂商 API 申请链接 */}
+                    {(() => {
+                      const linkMap: Record<string, string> = {
+                        bytedance: 'https://console.volcengine.com/ark',
+                        nvidia: 'https://build.nvidia.com',
+                        siliconflow: 'https://siliconflow.cn',
+                        deepseek: 'https://platform.deepseek.com',
+                        openai: 'https://platform.openai.com',
+                        anthropic: 'https://console.anthropic.com',
+                        google: 'https://aistudio.google.com',
+                        groq: 'https://console.groq.com',
+                        mistral: 'https://console.mistral.ai',
+                        qwen: 'https://dashscope.aliyun.com',
+                        zhipu: 'https://open.bigmodel.cn',
+                        baidu: 'https://cloud.baidu.com/doc/QIANFAN/index.html',
+                        kimi: 'https://platform.moonshot.cn',
+                        minimax: 'https://platform.minimaxi.com',
+                        stepfun: 'https://platform.stepfun.com',
+                        wenxin: 'https://cloud.baidu.com/doc/WENXINWORKSHOP/index.html',
+                        hunyuan: 'https://console.cloud.tencent.com/hunyuan',
+                        cohere: 'https://cohere.com',
+                        ollama: 'https://ollama.ai',
+                        openrouter: 'https://openrouter.ai',
+                        'eake-api': 'https://api.eake.cn'
+                      };
+                      const url = linkMap[p.id];
+                      return url ? (
+                        <a href={url} target="_blank" rel="noopener noreferrer" 
+                           style={{fontSize:11,color:'var(--accent)',textDecoration:'none',whiteSpace:'nowrap'}}>
+                          申请 API Key →
+                        </a>
+                      ) : null;
+                    })()}
+                  </div>
+                  <div style={{marginBottom:6}} onContextMenu={e => e.preventDefault()}>
+                    <div style={{fontSize:11,color:'var(--text2)',marginBottom:3}}>API Key</div>
+                    <div className="key-input-wrap">
+                      <input type={showQcKeys[p.id] ? 'text' : 'password'} placeholder="sk-..."
+                        value={qcEditing[p.id]?.api_key || ''}
+                        onChange={e => setQcEditing(prev => ({...prev, [p.id]: {...prev[p.id], api_key: e.target.value}}))}
+                        style={{...inp, fontSize:12}} />
+                      <button className="key-toggle-btn"
+                        onClick={() => setShowQcKeys(prev => ({...prev, [p.id]: !prev[p.id]}))}
+                        title={showQcKeys[p.id] ? '隐藏' : '显示'}
+                        style={{fontSize:10,padding:'3px 6px'}}>{showQcKeys[p.id] ? '👁' : '👁‍🗨'}</button>
+                    </div>
+                    <div className={`key-hint ${getKeyHint(p.id, qcEditing[p.id]?.api_key).type}`}
+                      style={{marginBottom:0}}>{getKeyHint(p.id, qcEditing[p.id]?.api_key).text}</div>
+                  </div>
+                  <div style={{marginBottom:6}}>
+                    <div style={{fontSize:11,color:'var(--text2)',marginBottom:3}}>API 地址</div>
+                    <input placeholder="https://..." value={qcEditing[p.id]?.base_url || ''}
+                      onChange={e => setQcEditing(prev => ({...prev, [p.id]: {...prev[p.id], base_url: e.target.value}}))}
+                      style={{...inp, fontSize:12}} />
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,color:'var(--text2)',marginBottom:3}}>模型名称 <span style={{color:'var(--text3)'}}>(填 API Key 后点「刷新」拉取)</span></div>
+                    {(() => {
+                      const saved = qcEditing[p.id]?.model;
+                      const fetched = providerModels[p.id] || [];
+                      const hasSaved = saved && !isApiKeyLike(saved) && isChatCapable(saved) && !fetched.some(c => c.id === saved);
+                      const options = hasSaved
+                        ? [{id: saved, name: saved, function_calling: null as null}, ...fetched]
+                        : fetched;
+                      return (
+                        <ModelDropdown
+                          value={qcEditing[p.id]?.model || ''}
+                          options={options}
+                          onChange={id => setQcEditing(prev => ({...prev, [p.id]: {...prev[p.id], model: id}}))}
+                          isApiKeyLike={isApiKeyLike}
+                          getModelInfo={getModelInfo}
+                          loading={!!loadingModels[p.id]}
+                          onRefresh={async () => {
+                            setLoadingModels(prev => ({...prev, [p.id]: true}));
+                            try {
+                              const models = await invoke('fetch_provider_models', { providerId: p.id }) as ModelCapability[];
+                              setProviderModels(prev => ({...prev, [p.id]: models}));
+                              showToast(`获取到 ${models.length} 个模型`);
+                            } catch(e: any) {
+                              showToast('刷新失败: ' + (e?.message || e));
+                            } finally {
+                              setLoadingModels(prev => ({...prev, [p.id]: false}));
+                            }
+                          }}
+                          providerId={p.id}
+                        />
+                      );
+                    })()}
+                  </div>
+                  <button className="btn-accent" style={{marginTop:8,width:'100%',fontSize:12,padding:'6px'}}
+                    onClick={async () => {
+                      const ed = qcEditing[p.id];
+                      if (!ed.api_key.trim()) { showToast('API Key 不能为空'); return; }
+                      try {
+                        await invoke('set_provider_api_key', { providerId: p.id, apiKey: ed.api_key.trim() });
+                        // 如果填写了模型名称，保存到 model_mapping
+                        if (ed.model?.trim()) {
+                          // 拦截 API Key 误存为模型名的操作
+                          if (isApiKeyLike(ed.model)) {
+                            showToast('❌ 模型名称看起来像 API Key，请先点「刷新」拉取真实模型列表');
+                            return;
+                          }
+                          // 拦截不能聊天的模型（embedding/vision/视频生成/lite 等）
+                          if (!isChatCapable(ed.model)) {
+                            showToast('❌ 该模型不支持对话接口，请选择支持聊天的模型（如 doubao-seed-evolving）');
+                            return;
+                          }
+                          console.log('Saving model:', p.id, ed.model.trim());
+                          await invoke('set_provider_model', { providerId: p.id, modelName: ed.model.trim() });
+                        }
+                        showToast(`✅ ${p.name} 配置已保存`);
+                        // 只刷新 providers 列表，不重置 qcEditing（保留用户输入的模型名称）
+                        const refreshed = await invoke('get_providers') as Provider[];
+                        setProviders(refreshed);
+                      } catch(e: any) { 
+                        console.error('Save failed:', e);
+                        showToast('❌ 保存失败: ' + (e?.message || e)); 
+                      }
+                    }}>保存配置</button>
+                </div>
+              ))}
+
+
+
+            </div>
+            <div className="modal-btns">
+              <button className="btn-sm" onClick={() => setQuickConfigOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 一键切换弹窗 ── */}
+      {quickSwitchOpen && (
+        <div className="overlay" onClick={() => setQuickSwitchOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:480}}>
+            <h3>🔄 一键切换</h3>
+            <div style={{margin:'12px 0',maxHeight:'60vh',overflowY:'auto'}}>
+              {tools.filter(t => detectResults.find(d => d.tool_id === t.id)?.installed).map(t => {
+                const d = detectResults.find(r => r.tool_id === t.id);
+                const current = providers.find(p => p.id === t.active_provider_id);
+                return (
+                  <div key={t.id} style={{marginBottom:12,padding:'10px 12px',background:'var(--bg2)',borderRadius:8,border:'1px solid var(--border)'}}>
+                    <div style={{fontWeight:600,marginBottom:6,fontSize:13}}>{t.name}</div>
+                    <div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>
+                      当前: {current ? <span style={{color:'var(--cyan)'}}>{current.name}</span> : <span style={{color:'#f87171'}}>未配置</span>}
+                    </div>
+                    <select value={qsSelected[t.id] || ''}
+                      onChange={e => setQsSelected(prev => ({...prev, [t.id]: e.target.value}))}
+                      style={{...inp, fontSize:12, marginBottom:6}}>
+                      <option value="">-- 选择供应商 --</option>
+                      {providers.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} {p.api_key ? '✓' : '✗'}</option>
+                      ))}
+                    </select>
+                    <button className="btn-accent" style={{width:'100%',fontSize:12,padding:'5px'}}
+                      disabled={!qsSelected[t.id]}
+                      onClick={async () => {
+                        if (!qsSelected[t.id]) return;
+                        const pv = providers.find(p => p.id === qsSelected[t.id]);
+                        if (!pv?.api_key) { showToast(`❌ ${pv?.name} 尚未配置 API Key`); return; }
+                        try {
+                          await invoke('activate_provider_for_tool', { toolId: t.id, providerId: qsSelected[t.id] });
+                          showToast(`✅ ${t.name} → ${pv?.name}`);
+                          await loadData();
+                        } catch(e: any) { showToast('❌ 切换失败: ' + (e?.message || e)); }
+                      }}>切换</button>
+                  </div>
+                );
+              })}
+              {tools.filter(t => detectResults.find(d => d.tool_id === t.id)?.installed).length === 0 && (
+                <div style={{padding:20,textAlign:'center',color:'var(--text2)'}}>没有已安装的工具</div>
+              )}
+            </div>
+            <div className="modal-btns">
+              <button className="btn-sm" onClick={() => setQuickSwitchOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+/* ── 意见反馈弹窗 ── */
+function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [contact, setContact] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ok: boolean, msg: string} | null>(null);
+
+  const handleSubmit = async () => {
+    if (!content.trim()) { setResult({ok:false, msg:'请填写反馈内容'}); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch('https://agent.eake.cn/wp-json/wp/v2/comments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic ' + btoa('eakecn:qjag 2LCM BB9r OTQz qPjj tDV2'),
+        },
+        body: JSON.stringify({
+          post: 2177,
+          author_name: 'CodexHub 用户',
+          author_email: contact || 'noreply@codexhub.cn',
+          content: `${title ? `【${title}】
+
+` : ''}${content}`,
+        }),
+      });
+      if (res.ok) {
+        setResult({ ok: true, msg: '感谢反馈！' });
+        setTitle(''); setContent(''); setContact('');
+      } else {
+        const err = await res.json().catch(() => null);
+        setResult({ ok: false, msg: `提交失败: ${err?.message || res.statusText}` });
+      }
+    } catch (e: any) {
+      setResult({ ok: false, msg: '网络错误，请检查连接' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return createPortal(
+    <div className="overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:480}}>
+        <h3>💬 反馈</h3>
+        {result && (
+          <div style={{
+            padding:'8px 12px', borderRadius:6, marginBottom:12, fontSize:13,
+            background: result.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+            color: result.ok ? '#10b981' : '#ef4444'
+          }}>
+            {result.msg}
+          </div>
+        )}
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:12, color:'var(--text2)', marginBottom:4}}>标题（可选）</div>
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            style={{
+              padding:'8px 10px', borderRadius:6, border:'1px solid var(--border)',
+              background:'var(--card)', color:'var(--text)', fontSize:13, width:'100%'
+            }} placeholder="简要描述" />
+        </div>
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:12, color:'var(--text2)', marginBottom:4}}>内容 *</div>
+          <textarea value={content} onChange={e => setContent(e.target.value)}
+            style={{
+              padding:'8px 10px', borderRadius:6, border:'1px solid var(--border)',
+              background:'var(--card)', color:'var(--text)', fontSize:13, width:'100%',
+              minHeight:120, resize:'vertical', fontFamily:'inherit'
+            }} placeholder="请详细描述您的问题或建议..." />
+        </div>
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:12, color:'var(--text2)', marginBottom:4}}>联系方式（可选）</div>
+          <input value={contact} onChange={e => setContact(e.target.value)}
+            style={{
+              padding:'8px 10px', borderRadius:6, border:'1px solid var(--border)',
+              background:'var(--card)', color:'var(--text)', fontSize:13, width:'100%'
+            }} placeholder="邮箱/微信（方便我们联系您）" />
+        </div>
+        <div className="modal-btns">
+          <button className="btn-sm" onClick={onClose}>取消</button>
+          <button className="btn-accent" onClick={handleSubmit} disabled={submitting || !content.trim()}>
+            {submitting ? '提交中...' : '提交反馈'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+export default App;

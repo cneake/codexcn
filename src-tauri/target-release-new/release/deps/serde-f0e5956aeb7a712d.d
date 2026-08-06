@@ -1,0 +1,14 @@
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\serde-f0e5956aeb7a712d.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\integer128.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\mod.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\de.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\ser.rs D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\serde-9a42948fb3c64b9f\out/private.rs
+
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\libserde-f0e5956aeb7a712d.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\integer128.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\mod.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\de.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\ser.rs D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\serde-9a42948fb3c64b9f\out/private.rs
+
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\libserde-f0e5956aeb7a712d.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\integer128.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\mod.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\de.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\ser.rs D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\serde-9a42948fb3c64b9f\out/private.rs
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\integer128.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\mod.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\de.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\serde-1.0.228\src\private\ser.rs:
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\serde-9a42948fb3c64b9f\out/private.rs:
+
+# env-dep:OUT_DIR=D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\\release\\build\\serde-9a42948fb3c64b9f\\out

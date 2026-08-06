@@ -1,0 +1,11 @@
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\siphasher-6dede7a142be5a87.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\common.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip128.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\../README.md
+
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\libsiphasher-6dede7a142be5a87.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\common.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip128.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\../README.md
+
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\libsiphasher-6dede7a142be5a87.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\common.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip128.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\../README.md
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\common.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\sip128.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\siphasher-1.0.3\src\../README.md:

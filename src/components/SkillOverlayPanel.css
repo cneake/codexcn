@@ -1,0 +1,192 @@
+/* 技能调用记录面板 - 可拖动浮窗 */
+.skill-overlay-panel {
+  position: fixed;
+  top: 44px; /* header 高度 */
+  right: 0;
+  height: calc(100vh - 44px);
+  background: #12121e;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  z-index: 100; /* 置顶于其他面板之上 */
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  user-select: none;
+}
+
+/* 拖拽手柄 - 左边缘 */
+.skill-overlay-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px; /* 加宽到10px更易点中 */
+  cursor: ew-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 10;
+}
+
+.skill-overlay-resize-handle:hover {
+  background: rgba(0, 240, 255, 0.3);
+}
+
+/* 标题栏 */
+.skill-overlay-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 36px;
+  flex-shrink: 0;
+  cursor: grab; /* 标题栏显示可拖动光标 */
+}
+
+.skill-overlay-panel-header:active {
+  cursor: grabbing;
+}
+
+.skill-overlay-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  letter-spacing: 0.5px;
+}
+
+.skill-overlay-panel-close {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  color: #aaa;
+  cursor: pointer;
+  padding: 2px 7px;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.skill-overlay-panel-close:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* 内容区 */
+.skill-overlay-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.skill-overlay-panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.skill-overlay-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.skill-overlay-panel-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+
+/* 空状态 */
+.skill-overlay-panel-empty {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.3);
+  padding: 32px 0;
+  font-size: 13px;
+}
+
+/* 记录项 */
+.skill-overlay-panel-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.skill-overlay-panel-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 当前正在调用的 skill 高亮 */
+.skill-overlay-panel-item.active {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.6);
+  }
+}
+
+.skill-overlay-panel-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.skill-overlay-panel-tool-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.skill-overlay-panel-time {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.skill-overlay-panel-item-name {
+  font-size: 13px;
+  color: #c0c0c0;
+  line-height: 1.4;
+}
+
+/* 浅色模式 */
+[data-theme="light"] .skill-overlay-panel {
+  background: #f8f8fc;
+  border-left-color: #d0d0e0;
+}
+
+[data-theme="light"] .skill-overlay-panel-header {
+  background: rgba(0, 0, 0, 0.03);
+  border-bottom-color: #e0e0e8;
+}
+
+[data-theme="light"] .skill-overlay-panel-title {
+  color: #1a1a2e;
+}
+
+[data-theme="light"] .skill-overlay-panel-item {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: #e0e0e8;
+}
+
+[data-theme="light"] .skill-overlay-panel-item.active {
+  background: rgba(0, 200, 255, 0.15);
+  border-color: rgba(0, 200, 255, 0.5);
+  box-shadow: 0 0 12px rgba(0, 200, 255, 0.3);
+}
+
+[data-theme="light"] .skill-overlay-panel-item-name {
+  color: #2a2a3e;
+}
+
+[data-theme="light"] .skill-overlay-panel-empty {
+  color: rgba(0, 0, 0, 0.35);
+}

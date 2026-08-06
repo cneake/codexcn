@@ -1,0 +1,104 @@
+{
+  "total": 11,
+  "skills": [
+    {
+      "slug": "agent-email",
+      "name": "Agent Email",
+      "description": "通过 QQ Agent 邮箱（OAuth 2.1）专用 CLI 工具操作邮件：发送、回复、转发、搜索、读取、下载附件、管理收件箱",
+      "category": "邮件",
+      "author": "QClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/agent-email.zip"
+    },
+    {
+      "slug": "pdf",
+      "name": "PDF 处理",
+      "description": "PDF 文件读取、合并、拆分、旋转、加水印、提取图片、OCR 识别",
+      "category": "文档",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/pdf.zip"
+    },
+    {
+      "slug": "xlsx",
+      "name": "Excel 处理",
+      "description": "Excel 文件读取、编辑、格式化、图表生成、数据清洗",
+      "category": "表格",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/xlsx.zip"
+    },
+    {
+      "slug": "docx",
+      "name": "Word 处理",
+      "description": "Word 文档创建、读取、编辑、格式化、模板生成",
+      "category": "文档",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/docx.zip"
+    },
+    {
+      "slug": "qclaw-rules",
+      "name": "QClaw 运行规则",
+      "description": "OpenClaw 系统基础运行规则，强制加载，不可卸载",
+      "category": "系统",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/qclaw-rules.zip"
+    },
+    {
+      "slug": "qclaw-env",
+      "name": "环境诊断工具",
+      "description": "OpenClaw skill 全链路环境诊断与安装工具",
+      "category": "系统",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/qclaw-env.zip"
+    },
+    {
+      "slug": "find-skills",
+      "name": "技能发现助手",
+      "description": "帮助用户发现和安装 Agent 技能",
+      "category": "系统",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/find-skills.zip"
+    },
+    {
+      "slug": "multi-search-engine",
+      "name": "多搜索引擎聚合",
+      "description": "集成 17 个搜索引擎（8 个国内 + 9 个国际），支持高级搜索语法",
+      "category": "搜索",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/multi-search-engine.zip"
+    },
+    {
+      "slug": "xbrowser",
+      "name": "浏览器自动化",
+      "description": "控制真实 Chrome/Edge/QQ 浏览器，支持登录态复用、截图、表单填写",
+      "category": "浏览器",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/xbrowser.zip"
+    },
+    {
+      "slug": "persona-switch",
+      "name": "人设切换",
+      "description": "切换 Agent 人设（赛博朋友/温柔伴侣/创始人龙虾）",
+      "category": "系统",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/persona-switch.zip"
+    },
+    {
+      "slug": "hermes",
+      "name": "Hermès 信息助手",
+      "description": "爱马仕产品、新闻、财务、官网资源查询",
+      "category": "信息",
+      "author": "OpenClaw",
+      "version": "1.0.0",
+      "download_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/hermes.zip"
+    }
+  ]
+}

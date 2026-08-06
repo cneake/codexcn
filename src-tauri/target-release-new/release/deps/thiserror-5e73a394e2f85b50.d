@@ -1,0 +1,14 @@
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\thiserror-5e73a394e2f85b50.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\aserror.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\var.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\private.rs D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\thiserror-3a32a62f3925e9ca\out/private.rs
+
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\libthiserror-5e73a394e2f85b50.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\aserror.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\var.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\private.rs D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\thiserror-3a32a62f3925e9ca\out/private.rs
+
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\libthiserror-5e73a394e2f85b50.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\aserror.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\var.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\private.rs D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\thiserror-3a32a62f3925e9ca\out/private.rs
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\aserror.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\display.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\var.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.18\src\private.rs:
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\build\thiserror-3a32a62f3925e9ca\out/private.rs:
+
+# env-dep:OUT_DIR=D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\\release\\build\\thiserror-3a32a62f3925e9ca\\out

@@ -1,0 +1,409 @@
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+
+interface ConflictItem {
+  source: string;
+  path: string;
+  version: string;
+  isDefault: boolean;
+  runnable: boolean;
+}
+
+interface DiagnoseResult {
+  hasConflict: boolean;
+  items: ConflictItem[];
+  defaultPath: string | null;
+}
+
+interface AgentTool {
+  id: string;
+  name: string;
+  command: string;
+  npmPkg: string;
+  icon: string;
+  installed: boolean;
+  localVersion: string | null;
+  npmVersion: string | null;
+  canUpgrade: boolean;
+  upgrading: boolean;
+  checking: boolean;
+  diagnosing: boolean;
+  diagnoseResult: DiagnoseResult | null;
+  showDiagnose: boolean;
+}
+
+const TOOLS: { id: string; name: string; command: string; npmPkg: string; icon: string }[] = [
+  { id: 'claude-code', name: 'Claude Code', command: 'claude', npmPkg: '@anthropic-ai/claude-code', icon: '/claude-code.svg' },
+  { id: 'codex', name: 'Codex', command: 'codex', npmPkg: '@openai/codex', icon: '/codex.svg' },
+  { id: 'gemini-cli', name: 'Gemini CLI', command: 'gemini', npmPkg: '@google/gemini-cli', icon: '/gemini-cli.svg' },
+  { id: 'opencode', name: 'OpenCode', command: 'opencode', npmPkg: 'opencode', icon: '/opencode.svg' },
+  { id: 'deepseek-cli', name: 'DeepSeek CLI', command: 'deepseek', npmPkg: '@sluisr/deepseek-cli', icon: '/deepseek-cli.svg' },
+  { id: 'openclaw', name: 'OpenClaw', command: 'openclaw', npmPkg: 'openclaw', icon: '/openclaw.svg' },
+  { id: 'hermes-agent', name: 'Hermes', command: 'hermes', npmPkg: 'hermes', icon: '/hermes-agent.svg' },
+];
+
+export default function AgentManager({ onToast }: { onToast: (msg: string) => void }) {
+  const [tools, setTools] = useState<AgentTool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showRoute, setShowRoute] = useState(false);
+
+  const loadAll = async () => {
+    setLoading(true);
+    let installedIds: string[] = [];
+    try {
+      const det = await invoke('detect_tools_detail') as any[];
+      installedIds = det.filter((d: any) => d.installed).map((d: any) => d.tool_id);
+    } catch (_) {}
+
+    const items: AgentTool[] = TOOLS.map(t => ({
+      ...t,
+      installed: installedIds.includes(t.id),
+      localVersion: null,
+      npmVersion: null,
+      canUpgrade: false,
+      upgrading: false,
+      checking: true,
+      diagnosing: false,
+      diagnoseResult: null,
+      showDiagnose: false,
+    }));
+    setTools(items);
+
+    // 对每个工具调用 Rust 端统一比对
+    const promises = items.map(async (item) => {
+      try {
+        const result = await invoke('check_tool_upgrade', { toolId: item.id }) as [string, string, boolean];
+        return { id: item.id, localVersion: result[0] || null, npmVersion: result[1] || null, canUpgrade: result[2] };
+      } catch {
+        // 单独获取
+        let localVer: string | null = null;
+        let npmVer: string | null = null;
+        if (item.installed) {
+          try { localVer = await invoke('get_tool_local_version', { toolId: item.id }) as string; } catch {}
+        }
+        try { npmVer = await invoke('get_tool_npm_version', { toolId: item.id }) as string; } catch {}
+        return { id: item.id, localVersion: localVer, npmVersion: npmVer, canUpgrade: false };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    setTools(prev => prev.map(t => {
+      const r = results.find(x => x.id === t.id);
+      if (!r) return t;
+      return { ...t, localVersion: r.localVersion, npmVersion: r.npmVersion, canUpgrade: r.canUpgrade, checking: false };
+    }));
+    setLoading(false);
+  };
+
+  useEffect(() => { loadAll(); }, []);
+
+  const handleDiagnose = async (id: string) => {
+    const tool = tools.find(t => t.id === id);
+    if (tool?.showDiagnose) {
+      setTools(prev => prev.map(t => t.id === id ? { ...t, showDiagnose: false } : t));
+      return;
+    }
+    setTools(prev => prev.map(t => t.id === id ? { ...t, diagnosing: true, showDiagnose: true } : t));
+    try {
+      const result = await invoke('diagnose_tool_conflicts', { toolId: id }) as DiagnoseResult;
+      setTools(prev => prev.map(t => t.id === id ? { ...t, diagnoseResult: result, diagnosing: false } : t));
+    } catch (e: any) {
+      onToast(`❌ 诊断失败: ${e?.message || e}`);
+      setTools(prev => prev.map(t => t.id === id ? { ...t, diagnosing: false } : t));
+    }
+  };
+
+  const handleUpgrade = async (id: string) => {
+    setTools(prev => prev.map(t => t.id === id ? { ...t, upgrading: true } : t));
+    try {
+      const msg = await invoke('upgrade_npm_tool', { toolId: id }) as string;
+      onToast(`✅ ${TOOLS.find(t => t.id === id)?.name} ${msg}`);
+      // 升级后重新检测
+      let localVer: string | null = null;
+      let npmVer: string | null = null;
+      let canUpgrade = false;
+      try {
+        const result = await invoke('check_tool_upgrade', { toolId: id }) as [string, string, boolean];
+        localVer = result[0] || null;
+        npmVer = result[1] || null;
+        canUpgrade = result[2];
+      } catch {}
+      setTools(prev => prev.map(t =>
+        t.id === id ? { ...t, localVersion: localVer, npmVersion: npmVer, canUpgrade, upgrading: false } : t
+      ));
+    } catch (e: any) {
+      onToast(`❌ 升级失败: ${e?.message || e}`);
+      setTools(prev => prev.map(t => t.id === id ? { ...t, upgrading: false } : t));
+    }
+  };
+
+  const updateCount = tools.filter(t => t.canUpgrade).length;
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--card, #1a1a2e)',
+    border: '1px solid var(--border, #2a2a3e)',
+    borderRadius: 12,
+    padding: 20,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  };
+
+  const rowStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: 13,
+  };
+
+  const btnPrimary: React.CSSProperties = {
+    padding: '8px 16px',
+    borderRadius: 6,
+    fontSize: 12,
+    border: 'none',
+    background: 'var(--cyan, #00d4aa)',
+    color: '#000',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+  };
+
+  const btnSecondary: React.CSSProperties = {
+    padding: '8px 16px',
+    borderRadius: 6,
+    fontSize: 12,
+    border: '1px solid var(--border, #2a2a3e)',
+    background: 'var(--bg2, #252538)',
+    color: 'var(--text, #fff)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+  };
+
+  const tagYellow: React.CSSProperties = {
+    background: '#d4a017',
+    color: '#000',
+    fontSize: 11,
+    padding: '2px 8px',
+    borderRadius: 4,
+    fontWeight: 600,
+  };
+
+  const tagBlue: React.CSSProperties = {
+    background: '#2563eb',
+    color: '#fff',
+    fontSize: 10,
+    padding: '2px 6px',
+    borderRadius: 4,
+  };
+
+  const tagCyan: React.CSSProperties = {
+    background: 'var(--cyan, #00d4aa)',
+    color: '#000',
+    fontSize: 10,
+    padding: '2px 6px',
+    borderRadius: 4,
+    fontWeight: 600,
+  };
+
+  const tagRed: React.CSSProperties = {
+    background: '#dc2626',
+    color: '#fff',
+    fontSize: 10,
+    padding: '2px 6px',
+    borderRadius: 4,
+    fontWeight: 600,
+  };
+
+  return (
+    <div style={{ padding: 24, width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text, #fff)', marginBottom: 4 }}>
+          Agent 管理
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text2, #888)' }}>
+          检测版本 · 诊断冲突 · 一键升级
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <button onClick={loadAll} disabled={loading} style={btnSecondary}>
+          ↻ {loading ? '刷新中...' : '刷新'}
+        </button>
+        <button onClick={() => setShowRoute(!showRoute)} style={btnSecondary}>
+          🛣 路由 {showRoute ? '▲' : '▼'}
+        </button>
+        <button onClick={() => tools.filter(t => t.installed).forEach(t => handleDiagnose(t.id))} disabled={loading} style={btnSecondary}>
+          🔍 诊断全部
+        </button>
+        <button onClick={loadAll} disabled={loading} style={{...btnSecondary, background: 'var(--cyan, #00d4aa)', color: '#000', border: 'none'}}>
+          🔎 一键检测
+        </button>
+        {updateCount > 0 && (
+          <button onClick={() => tools.filter(t => t.canUpgrade).forEach(t => handleUpgrade(t.id))} style={btnPrimary}>
+            ⬆ 全部升级 ({updateCount})
+          </button>
+        )}
+      </div>
+
+      {showRoute && (
+        <div style={{
+          background: 'var(--card, #1a1a2e)',
+          border: '1px solid var(--border, #2a2a3e)',
+          borderRadius: 12,
+          padding: 20,
+          marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #fff)', marginBottom: 12 }}>
+            命令行路由说明
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text2, #888)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>• 当你在终端输入 <code style={{ color: 'var(--cyan, #00d4aa)' }}>claude --version</code> 时，系统按 PATH 顺序查找可执行文件</div>
+            <div>• PATH 中第一处匹配的即为实际运行版本（标记为「默认」）</div>
+            <div>• npm install -g 可能写到别的目录，导致升级后仍在用旧版本</div>
+            <div>• 点击卡片右上角 <strong style={{ color: '#fff' }}>i</strong> 或卡片区域查看该工具的完整安装路径</div>
+            <div>• 诊断结果中：<span style={{ color: 'var(--cyan, #00d4aa)' }}>绿色</span> = 可正常运行，<span style={{ color: '#ff4444' }}>红色</span> = 无法运行</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+        {tools.map(t => (
+          <div key={t.id} style={cardStyle}>
+            {/* 卡片头部：图标+名称+状态标签 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <img src={t.icon} alt="" style={{ width: 28, height: 28, borderRadius: 6 }} />
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text, #fff)', lineHeight: 1.3 }}>{t.name}</div>
+                  <span style={tagBlue}>Win</span>
+                </div>
+              </div>
+              {t.canUpgrade ? (
+                <span style={tagYellow}>可升级</span>
+              ) : !t.localVersion && t.installed ? (
+                <span style={tagRed} title="本地版本读取失败">读取失败</span>
+              ) : !t.npmVersion ? (
+                <span style={tagRed} title="npm 版本获取失败">获取失败</span>
+              ) : t.installed ? (
+                <span style={tagCyan}>正常</span>
+              ) : null}
+            </div>
+
+            {/* 状态信息 */}
+            <div style={{ marginTop: 8 }}>
+              <div style={rowStyle}>
+                <span style={{ color: 'var(--text2, #888)' }}>当前版本</span>
+                <span style={{ color: 'var(--text, #fff)', fontFamily: 'monospace', fontSize: 12 }}>
+                  {t.checking ? '...' : (t.installed ? (t.localVersion || '读取失败') : '未安装')}
+                </span>
+              </div>
+              <div style={rowStyle}>
+                <span style={{ color: 'var(--text2, #888)' }}>最新版本</span>
+                <span style={{ color: t.canUpgrade ? 'var(--cyan, #00d4aa)' : 'var(--text, #fff)', fontFamily: 'monospace', fontSize: 12 }}>
+                  {t.checking ? '...' : (t.npmVersion || '获取失败')}
+                </span>
+              </div>
+            </div>
+
+            {/* 诊断面板（可展开） */}
+            {t.showDiagnose && (
+              <div style={{
+                background: '#2a1a00',
+                border: '1px solid #d4a017',
+                borderRadius: 8,
+                padding: 12,
+                marginTop: 4,
+              }}>
+                {t.diagnosing ? (
+                  <div style={{ fontSize: 12, color: '#888', textAlign: 'center', padding: 8 }}>
+                    🔍 诊断中...
+                  </div>
+                ) : t.diagnoseResult ? (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: t.diagnoseResult.hasConflict ? '#d4a017' : 'var(--cyan, #00d4aa)', marginBottom: 6 }}>
+                      {t.diagnoseResult.hasConflict ? `⚠️ 检测到 ${t.diagnoseResult.items.length} 处安装` : `✅ 唯一安装位置`}
+                    </div>
+                    {t.diagnoseResult.hasConflict && (
+                      <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>
+                        命令行实际使用标「默认」的那处；升级可能写到了别处
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {t.diagnoseResult.items.map((item, idx) => (
+                        <div key={idx} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          background: 'rgba(0,0,0,0.3)',
+                          padding: '5px 8px',
+                          borderRadius: 4,
+                        }}>
+                          <span style={{ color: '#666', minWidth: 45, flexShrink: 0 }}>{item.source}</span>
+                          <span style={{ color: '#ccc', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.path}</span>
+                          <span style={{ color: item.runnable ? 'var(--cyan, #00d4aa)' : '#ff4444', flexShrink: 0 }}>{item.version}</span>
+                          {item.isDefault && <span style={{ ...tagBlue, fontSize: 9, flexShrink: 0 }}>默认</span>}
+                          {!item.runnable && <span style={{ color: '#ff4444', fontSize: 9, flexShrink: 0 }}>❌</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            {/* 操作按钮区 */}
+            {!t.installed ? (
+              <>
+                <div style={{ fontSize: 12, color: 'var(--text2, #666)', fontStyle: 'italic', marginTop: 4 }}>
+                  not installed or not executable
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                  <button
+                    onClick={() => handleDiagnose(t.id)}
+                    style={{ ...btnSecondary, fontSize: 11, padding: '6px 12px' }}
+                    title="查看安装位置"
+                  >
+                    i 诊断
+                  </button>
+                  <button style={{ ...btnSecondary, fontSize: 11, padding: '6px 12px' }}>⬇ 安装</button>
+                </div>
+              </>
+            ) : t.canUpgrade ? (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button
+                  onClick={() => handleDiagnose(t.id)}
+                  style={{ ...btnSecondary, fontSize: 11, padding: '6px 12px' }}
+                  title="查看安装位置"
+                >
+                  i 诊断
+                </button>
+                <button
+                  onClick={() => handleUpgrade(t.id)}
+                  disabled={t.upgrading}
+                  style={{ ...btnPrimary, fontSize: 11, padding: '6px 12px', opacity: t.upgrading ? 0.6 : 1 }}
+                >
+                  {t.upgrading ? '⬆ 升级中...' : '⬆ 升级'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                <button
+                  onClick={() => handleDiagnose(t.id)}
+                  style={{ ...btnSecondary, fontSize: 11, padding: '6px 12px' }}
+                  title="点击查看安装位置和冲突"
+                >
+                  {t.showDiagnose ? '▲ 收起' : '🔍 诊断位置'}
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

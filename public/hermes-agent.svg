@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Hermes Agent 官方 logo：白色圆角方块 + 黑色动漫女孩（长发+发箍） -->
+  <rect width="24" height="24" rx="5" fill="#FFFFFF"/>
+
+  <!-- 简化的动漫女孩头像（黑白线稿风格） -->
+  <g fill="#1a1a1a" transform="translate(12 12.5)">
+    <!-- 头部（圆形） -->
+    <ellipse cx="0" cy="-1" rx="4.5" ry="5" fill="#1a1a1a"/>
+    <!-- 脸部（白色，露出五官） -->
+    <ellipse cx="0" cy="0" rx="3" ry="3.8" fill="#FFFFFF"/>
+    <!-- 头发刘海（覆盖额头） -->
+    <path d="M -4.5 -3 Q -3 -5.5 0 -5.5 Q 3 -5.5 4.5 -3 L 4.5 -1 Q 3 -2 0 -2 Q -3 -2 -4.5 -1 Z" fill="#1a1a1a"/>
+    <!-- 发箍（横线+小蝴蝶结） -->
+    <rect x="-4.5" y="-4" width="9" height="0.8" fill="#FFFFFF"/>
+    <circle cx="-3.5" cy="-3.5" r="0.6" fill="#FFFFFF"/>
+    <circle cx="3.5" cy="-3.5" r="0.6" fill="#FFFFFF"/>
+    <!-- 左眼（眼珠+眼神） -->
+    <ellipse cx="-1.2" cy="0.2" rx="0.5" ry="0.8" fill="#1a1a1a"/>
+    <!-- 右眼 -->
+    <ellipse cx="1.2" cy="0.2" rx="0.5" ry="0.8" fill="#1a1a1a"/>
+    <!-- 鼻子（小白点） -->
+    <circle cx="0" cy="1.5" r="0.2" fill="#1a1a1a"/>
+    <!-- 嘴巴（小弧线） -->
+    <path d="M -0.6 2.4 Q 0 2.7 0.6 2.4" fill="none" stroke="#1a1a1a" stroke-width="0.3" stroke-linecap="round"/>
+    <!-- 两侧长发（覆盖到肩膀） -->
+    <path d="M -4.5 -2 Q -5.5 2 -4.5 6 L -3 6 Q -3 2 -3 -1 Z" fill="#1a1a1a"/>
+    <path d="M 4.5 -2 Q 5.5 2 4.5 6 L 3 6 Q 3 2 3 -1 Z" fill="#1a1a1a"/>
+    <!-- 脖子 -->
+    <rect x="-0.8" y="3.5" width="1.6" height="1.5" fill="#FFFFFF" stroke="#1a1a1a" stroke-width="0.2"/>
+  </g>
+</svg>

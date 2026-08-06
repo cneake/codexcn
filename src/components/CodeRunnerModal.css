@@ -1,0 +1,95 @@
+/* GenHub CodeRunnerModal — Tab Bar (VS Code 风格) */
+
+.crm-tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: #252526;
+  border-bottom: 1px solid #2a2a4a;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+}
+
+.crm-tab-bar::-webkit-scrollbar {
+  height: 3px;
+}
+
+.crm-tab-bar::-webkit-scrollbar-thumb {
+  background: #444;
+}
+
+.crm-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px 7px 14px;
+  font-size: 12px;
+  color: #969696;
+  background: #252526;
+  border-right: 1px solid #1a1a2e;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.crm-tab:hover {
+  background: #2d2d2d;
+}
+
+.crm-tab.active {
+  background: #1e1e1e;
+  color: #fff;
+  border-bottom: 2px solid #00f0ff;
+}
+
+.crm-tab-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crm-tab-dirty {
+  color: #00f0ff;
+  font-size: 10px;
+}
+
+.crm-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+
+.crm-tab-close:hover {
+  color: #ff6b6b;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.crm-tab-add {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+
+.crm-tab-add:hover {
+  color: #00f0ff;
+  background: #2d2d2d;
+}

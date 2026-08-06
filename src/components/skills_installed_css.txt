@@ -1,0 +1,28 @@
+
+/* ── 已安装技能视图切换 ── */
+.skills-panel-root .sp-section-title-row { border-bottom: 1px solid var(--border); margin-bottom: 14px; padding-bottom: 0; }
+.skills-panel-root .sp-view-toggle { display: flex; gap: 8px; }
+.skills-panel-root .sp-view-btn { flex: 1; padding: 10px 0; border: none; background: transparent; color: var(--text2); font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.skills-panel-root .sp-view-btn:hover { color: var(--text); }
+.skills-panel-root .sp-view-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+/* ── 已安装技能列表 ── */
+.skills-panel-root .sp-installed-list { display: flex; flex-direction: column; gap: 10px; }
+.skills-panel-root .sp-installed-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; transition: border-color 0.15s; }
+.skills-panel-root .sp-installed-item:hover { border-color: rgba(0,240,255,0.3); }
+.skills-panel-root .sp-installed-info { flex: 1; min-width: 0; }
+.skills-panel-root .sp-installed-name { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.skills-panel-root .sp-installed-slug { font-size: 12px; color: var(--text-dim); font-family: ui-monospace, monospace; }
+.skills-panel-root .sp-installed-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.skills-panel-root .sp-act-btn { padding: 6px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; border: 1px solid var(--border); background: var(--bg2); color: var(--text); white-space: nowrap; transition: all 0.15s; }
+.skills-panel-root .sp-act-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.skills-panel-root .sp-act-btn.view:hover { border-color: #60a5fa; color: #60a5fa; }
+.skills-panel-root .sp-act-btn.copy:hover, .sp-act-btn.copy.copied { border-color: #4ade80; color: #4ade80; }
+.skills-panel-root .sp-act-btn.export:hover { border-color: #c084fc; color: #c084fc; }
+.skills-panel-root .sp-act-btn.reinstall:hover { border-color: #fbbf24; color: #fbbf24; }
+.skills-panel-root .sp-act-btn.uninstall:hover { border-color: #f87171; color: #f87171; }
+.skills-panel-root .sp-act-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── SKILL.md 预览弹窗 ── */
+.skills-panel-root .sp-readme-modal { width: 720px; }
+.skills-panel-root .sp-readme-pre { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 12px; line-height: 1.7; color: var(--text); white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

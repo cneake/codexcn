@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Logo 预览 v2 - 等用户确认</title>
+<style>
+  body {
+    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 40px;
+    margin: 0;
+    min-height: 100vh;
+  }
+  h1 { color: #00f0ff; margin-bottom: 30px; font-size: 24px; }
+  h2 { color: #a855f7; font-size: 18px; margin: 24px 0 16px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+  h2 small { color: #888; font-weight: normal; font-size: 13px; margin-left: 8px; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 20px; }
+  .item { text-align: center; }
+  .icon-box {
+    background: #1e1e2e;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+  .icon-box.dark { background: #0a0a0a; }
+  .icon-128 img { width: 128px; height: 128px; }
+  .icon-64 img { width: 64px; height: 64px; }
+  .icon-32 img { width: 32px; height: 32px; }
+  .icon-24 img { width: 24px; height: 24px; }
+  .label { font-size: 13px; color: #ccc; }
+  .label small { color: #888; display: block; margin-top: 4px; font-size: 11px; }
+  .note { background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; border-radius: 8px; padding: 16px; margin: 20px 0; color: #00f0ff; }
+</style>
+</head>
+<body>
+  <h1>🎨 Logo 预览 v2（不构建，等你确认）</h1>
+
+  <div class="note">
+    ✅ 重做了 5 个：Claude Code / Gemini / OpenCode / Hermes / OpenClaw<br>
+    📐 Codex 和 DeepSeek 不动（你说对的）
+  </div>
+
+  <h2>1. Claude Code <small>橙色方块 + 白色 12 角星（Anthropic 官方）</small></h2>
+  <div class="row">
+    <div class="item">
+      <div class="icon-box dark icon-128"><img src="claude-code.svg"/></div>
+      <div class="label">128px 预览</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-64"><img src="claude-code.svg"/></div>
+      <div class="label">64px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-32"><img src="claude-code.svg"/></div>
+      <div class="label">32px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="claude-code.svg"/></div>
+      <div class="label">24px 实际</div>
+    </div>
+  </div>
+
+  <h2>2. Gemini CLI <small>四色四角星（红/蓝/绿/黄）</small></h2>
+  <div class="row">
+    <div class="item">
+      <div class="icon-box icon-128"><img src="gemini-cli.svg"/></div>
+      <div class="label">128px 预览</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-64"><img src="gemini-cli.svg"/></div>
+      <div class="label">64px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-32"><img src="gemini-cli.svg"/></div>
+      <div class="label">32px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-24"><img src="gemini-cli.svg"/></div>
+      <div class="label">24px 实际</div>
+    </div>
+  </div>
+
+  <h2>3. OpenCode <small>白色方块 + 紫色云朵 + >_</small></h2>
+  <div class="row">
+    <div class="item">
+      <div class="icon-box icon-128"><img src="opencode.svg"/></div>
+      <div class="label">128px 预览</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-64"><img src="opencode.svg"/></div>
+      <div class="label">64px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-32"><img src="opencode.svg"/></div>
+      <div class="label">32px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-24"><img src="opencode.svg"/></div>
+      <div class="label">24px 实际</div>
+    </div>
+  </div>
+
+  <h2>4. Hermes Agent <small>白色方块 + 黑色动漫女孩（长发+发箍）</small></h2>
+  <div class="row">
+    <div class="item">
+      <div class="icon-box icon-128"><img src="hermes-agent.svg"/></div>
+      <div class="label">128px 预览</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-64"><img src="hermes-agent.svg"/></div>
+      <div class="label">64px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-32"><img src="hermes-agent.svg"/></div>
+      <div class="label">32px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-24"><img src="hermes-agent.svg"/></div>
+      <div class="label">24px 实际</div>
+    </div>
+  </div>
+
+  <h2>5. OpenClaw <small>红色小怪兽（圆胖身体+小眼+小手脚）</small></h2>
+  <div class="row">
+    <div class="item">
+      <div class="icon-box dark icon-128"><img src="openclaw.svg"/></div>
+      <div class="label">128px 预览</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-64"><img src="openclaw.svg"/></div>
+      <div class="label">64px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-32"><img src="openclaw.svg"/></div>
+      <div class="label">32px</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="openclaw.svg"/></div>
+      <div class="label">24px 实际</div>
+    </div>
+  </div>
+
+  <h2>不变的 2 个（你说对的）</h2>
+  <div class="row">
+    <div class="item">
+      <div class="icon-box icon-128"><img src="codex.svg"/></div>
+      <div class="label">Codex <small>OpenAI 玫瑰花结</small></div>
+    </div>
+    <div class="item">
+      <div class="icon-box icon-128"><img src="deepseek-cli.svg"/></div>
+      <div class="label">DeepSeek CLI <small>蓝色鱼</small></div>
+    </div>
+  </div>
+
+  <h2>📐 顶部菜单实际尺寸（24px）— 看深色背景下效果</h2>
+  <div class="row" style="background:#222; padding:20px; border-radius:12px;">
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="claude-code.svg"/></div>
+      <div class="label">Claude</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="codex.svg"/></div>
+      <div class="label">Codex</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="gemini-cli.svg"/></div>
+      <div class="label">Gemini</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="opencode.svg"/></div>
+      <div class="label">OpenCode</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="deepseek-cli.svg"/></div>
+      <div class="label">DeepSeek</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="openclaw.svg"/></div>
+      <div class="label">OpenClaw</div>
+    </div>
+    <div class="item">
+      <div class="icon-box dark icon-24"><img src="hermes-agent.svg"/></div>
+      <div class="label">Hermes</div>
+    </div>
+  </div>
+</body>
+</html>

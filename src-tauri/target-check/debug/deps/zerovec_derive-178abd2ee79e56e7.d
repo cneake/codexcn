@@ -1,0 +1,10 @@
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\zerovec_derive-178abd2ee79e56e7.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\make_ule.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\make_varule.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\ule.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\utils.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\varule.rs
+
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\zerovec_derive-178abd2ee79e56e7.dll: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\make_ule.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\make_varule.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\ule.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\utils.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\varule.rs
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\make_ule.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\make_varule.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\ule.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\utils.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\zerovec-derive-0.11.3\src\varule.rs:

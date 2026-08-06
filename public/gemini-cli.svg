@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <!-- Google Gemini 官方 logo：4 角星，每个角不同颜色 -->
+    <!-- 顶：红  右：蓝  底：绿  左：黄/橙 -->
+    <linearGradient id="geminiRed" x1="50%" y1="0%" x2="50%" y2="50%">
+      <stop offset="0%" stop-color="#FF6B6B"/>
+      <stop offset="100%" stop-color="#E94560"/>
+    </linearGradient>
+    <linearGradient id="geminiBlue" x1="50%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#5B7FFF"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+    <linearGradient id="geminiGreen" x1="50%" y1="100%" x2="50%" y2="50%">
+      <stop offset="0%" stop-color="#4ADE80"/>
+      <stop offset="100%" stop-color="#22C55E"/>
+    </linearGradient>
+    <linearGradient id="geminiYellow" x1="50%" y1="50%" x2="0%" y2="50%">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 4 个尖角，每角一个颜色，中间交汇 -->
+  <!-- 上尖（红） -->
+  <path d="M12 1.5 Q 11 1.5 10.5 2.5 L 10.5 11 Q 10.5 12 12 12 Q 13.5 12 13.5 11 L 13.5 2.5 Q 13 1.5 12 1.5 Z" fill="url(#geminiRed)"/>
+  <!-- 右尖（蓝） -->
+  <path d="M22.5 12 Q 22.5 11 21.5 10.5 L 13 10.5 Q 12 10.5 12 12 Q 12 13.5 13 13.5 L 21.5 13.5 Q 22.5 13 22.5 12 Z" fill="url(#geminiBlue)"/>
+  <!-- 下尖（绿） -->
+  <path d="M12 22.5 Q 13 22.5 13.5 21.5 L 13.5 13 Q 13.5 12 12 12 Q 10.5 12 10.5 13 L 10.5 21.5 Q 11 22.5 12 22.5 Z" fill="url(#geminiGreen)"/>
+  <!-- 左尖（黄/橙） -->
+  <path d="M1.5 12 Q 1.5 13 2.5 13.5 L 11 13.5 Q 12 13.5 12 12 Q 12 10.5 11 10.5 L 2.5 10.5 Q 1.5 11 1.5 12 Z" fill="url(#geminiYellow)"/>
+</svg>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>cc-switch-clone</title>
+    <script>
+      /* 立即应用主题（在 React 加载前执行，避免启动页闪烁） */
+      (function() {
+        try {
+          var saved = localStorage.getItem('codexhub-theme');
+          if (saved) {
+            document.documentElement.setAttribute('data-theme', saved);
+          } else {
+            document.documentElement.setAttribute('data-theme', 'dark');
+          }
+        } catch(e) { /* localStorage 不可用时忽略 */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

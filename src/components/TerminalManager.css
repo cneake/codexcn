@@ -1,0 +1,277 @@
+/* ── 工作目录设置条 ── */
+.tm-cwd-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tm-cwd-label {
+  font-size: 13px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.tm-cwd-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+.tm-cwd-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.tm-cwd-input::placeholder {
+  color: var(--text3);
+}
+.tm-cwd-clear {
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.tm-cwd-clear:hover {
+  background: var(--card-hover);
+  color: var(--text2);
+}
+
+/* ── 终端管理面板 ── */
+.tm-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.tm-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.tm-subtitle {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.tm-refresh-btn {
+  margin-left: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+.tm-refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── 主体：左侧列表 + 右侧终端 ── */
+.tm-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── 左侧工具列表 ── */
+.tm-sidebar {
+  width: 220px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 8px;
+}
+
+.tm-tool-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.12s;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+}
+.tm-tool-item:hover { background: var(--card); border-color: var(--border); }
+.tm-tool-item.active { background: rgba(0,240,255,0.08); border-color: rgba(0,240,255,0.2); }
+
+.tm-tool-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.tm-tool-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tm-tool-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tm-tool-id {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: 'Cascadia Code', monospace;
+}
+
+.tm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tm-dot.on { background: #22c55e; box-shadow: 0 0 6px #22c55e66; }
+.tm-dot.off { background: #555; }
+
+.tm-action {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+.tm-action.start { color: #00f0ff; }
+.tm-action.running { color: #22c55e; }
+.tm-action.stop { color: #f87171; }
+
+/* ── 右侧终端区域 ── */
+.tm-terminal-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tm-terminal-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tm-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tm-terminal-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tm-terminal-status {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.tm-terminal-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.12s;
+}
+.tm-terminal-close:hover { background: rgba(239,68,68,0.1); color: #f87171; }
+
+.tm-xterm-host {
+  flex: 1;
+  padding: 4px 8px;
+  background: #0a0a0f;
+  overflow: hidden;
+}
+
+/* ── 占位提示 ── */
+.tm-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tm-placeholder-icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+
+.tm-placeholder-text {
+  font-size: 15px;
+  color: var(--text2);
+  margin: 0;
+}
+
+.tm-placeholder-sub {
+  font-size: 12px;
+  color: var(--text3);
+  margin: 0;
+}
+
+/* ── 底部统计 ── */
+.tm-footer {
+  text-align: center;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text3);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ── 浅色模式 ── */
+[data-theme=light] .tm-tool-item:hover {
+  background: rgba(0,0,0,0.03);
+}
+[data-theme=light] .tm-tool-item.active {
+  background: rgba(0,150,200,0.06);
+}
+[data-theme=light] .tm-xterm-host {
+  background: #0a0a0f;
+}

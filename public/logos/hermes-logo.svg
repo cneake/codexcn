@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Hermes caduceus-inspired logo, cyan #00f0ff -->
+  <!-- Wing arcs -->
+  <path d="M10 8 Q7 4 4 8 Q7 12 10 8Z" fill="#00f0ff" opacity="0.9"/>
+  <path d="M22 8 Q25 4 28 8 Q25 12 22 8Z" fill="#00f0ff" opacity="0.9"/>
+  <!-- Staff -->
+  <line x1="16" y1="8" x2="16" y2="28" stroke="#00f0ff" stroke-width="2" stroke-linecap="round"/>
+  <!-- Serpent left -->
+  <path d="M16 12 Q13 16 16 20 Q19 24 16 28" stroke="#00f0ff" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- Serpent right -->
+  <path d="M16 12 Q19 16 16 20 Q13 24 16 28" stroke="#a855f7" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- Node accents -->
+  <circle cx="16" cy="12" r="1.5" fill="#00f0ff"/>
+  <circle cx="16" cy="20" r="1.5" fill="#a855f7"/>
+  <circle cx="16" cy="28" r="1.5" fill="#00f0ff"/>
+</svg>

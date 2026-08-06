@@ -1,0 +1,89 @@
+/* 内嵌终端样式 */
+.terminal-panel {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  height: 40px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+
+.terminal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.terminal-header-right {
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.terminal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.terminal-status {
+  font-size: 11px;
+  color: var(--text2);
+  padding: 2px 8px;
+  background: var(--card);
+  border-radius: 4px;
+}
+
+.terminal-btn {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .15s;
+}
+.terminal-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.terminal-body {
+  flex: 1;
+  padding: 4px 8px;
+  overflow: hidden;
+}
+.terminal-body .xterm {
+  height: 100%;
+}
+.terminal-body .xterm-viewport {
+  border-radius: 0 !important;
+}
+.terminal-body .xterm-screen {
+  height: 100% !important;
+}

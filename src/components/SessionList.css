@@ -1,0 +1,190 @@
+/* ── SessionList 左二栏 ── */
+.session-list {
+  width: 220px;
+  min-width: 220px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex-shrink: 0;
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
+/* 收起状态 */
+.session-list.collapsed {
+  width: 44px;
+  min-width: 44px;
+  overflow: hidden;
+}
+
+.sl-collapse-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.sl-collapse-btn:hover {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.sl-collapsed-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 20px 0;
+  color: var(--text2);
+}
+
+.sl-collapsed-icon {
+  font-size: 20px;
+}
+
+.sl-collapsed-text {
+  font-size: 9px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 1px;
+  opacity: 0.7;
+}
+
+.sl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sl-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.sl-btn-new {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--cyan);
+  background: rgba(0, 240, 255, 0.08);
+  color: var(--cyan);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.sl-btn-new:hover {
+  background: rgba(0, 240, 255, 0.2);
+}
+
+.sl-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.sl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 12px;
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.sl-btn-create {
+  padding: 4px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--cyan);
+  background: transparent;
+  color: var(--cyan);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sl-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px 4px;
+}
+
+.sl-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.15s;
+}
+
+.sl-item:hover {
+  background: var(--card);
+}
+
+.sl-item.active {
+  background: rgba(0, 240, 255, 0.06);
+  border-left-color: var(--cyan);
+}
+
+.sl-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sl-item-title {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sl-item.active .sl-item-title {
+  color: var(--cyan);
+}
+
+.sl-item-meta {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+.sl-item-del {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sl-item:hover .sl-item-del {
+  opacity: 1;
+}
+
+.sl-item-del:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}

@@ -1,0 +1,1688 @@
+mod config_writer;
+mod db;
+mod mcp;
+mod process;
+mod session_cleanup;
+mod skills;
+mod terminal;
+mod usage;
+
+use mcp::{McpServer, write_mcp_config_for_tool, read_mcp_config_for_tool};
+use skills::{get_skills_index, get_skillhub_status, install_skill, ping_skillhub, search_skills, uninstall_skill, get_tool_skills, add_skill_to_index, remove_skill_from_index, upload_skills_json, get_installed_skills, install_skill_from_market, install_skill_via_npm, get_bundled_skills};
+use session_cleanup::{cleanup_sessions_cache, estimate_cleanable_space};
+use usage::{get_all_usage, ToolUsage};
+
+use db::Database;
+use tauri::Manager;
+use tauri::Emitter;
+use std::io::Write;
+use std::os::windows::process::CommandExt;
+use std::panic::catch_unwind;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // [corrupted fixed]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .on_window_event(|window, event| {
+            let app = window.app_handle();
+            // z-order 跟随主窗口焦点：主窗口在前→浮窗置顶；切到其他 app→浮窗一起沉底
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if let Some(overlay) = app.get_webview_window("skill-overlay") {
+                    if window.label() == "main" {
+                        let _ = overlay.set_always_on_top(*focused);
+                    } else if window.label() == "skill-overlay" && *focused {
+                        let _ = overlay.set_always_on_top(true);
+                    }
+                }
+            }
+            // 主窗口移动/缩放时，技能浮窗持续吸附到主窗口右侧、上下各缩进 5px
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) = event {
+                    if let Some(overlay) = app.get_webview_window("skill-overlay") {
+                        if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+                            let new_y = pos.y;
+                            let new_h = size.height.saturating_sub(8);
+                            let new_x = pos.x + size.width as i32 - 16;
+                            let _ = overlay.set_position(tauri::PhysicalPosition::new(new_x, new_y));
+                            let _ = overlay.set_size(tauri::PhysicalSize::new(184, new_h));
+                        }
+                    }
+                }
+            }
+        })
+        .setup(|app| {
+            let database = Database::init(&app.handle())?;
+            app.manage(database);
+
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+
+            // [corrupted fixed]
+            use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+            let tray_menu = tauri::menu::MenuBuilder::new(app)
+                    .item(&tauri::menu::MenuItemBuilder::with_id("show", "显示 CodexHub").build(app)?)
+                    .item(&tauri::menu::MenuItemBuilder::with_id("quit", "退出 CodexHub").build(app)?)
+                    .build()?;
+            let tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "quit" => { app.exit(0); }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_providers,
+            get_provider,
+            add_provider,
+            delete_provider,
+            set_provider_api_key,
+            get_cli_tools,
+            get_cli_tools_with_installed,
+            get_active_provider_for_tool,
+            activate_provider_for_tool,
+            get_setting,
+            set_setting,
+            detect_installed_tools_cmd,
+            detect_tools_detail,
+            get_all_tool_configs,
+            export_all_configs,
+            import_all_configs,
+            open_url,
+            launch_tool,
+            // Terminal commands
+            terminal::create_terminal_session,
+            terminal::write_terminal,
+            terminal::close_terminal,
+            terminal::resize_terminal,
+            terminal::list_terminals,
+            // [corrupted fixed]
+            save_detection_cache,
+            load_detection_cache,
+            // Skill commands
+            get_skillhub_status,
+            ping_skillhub,
+            get_skills_index,
+            search_skills,
+            install_skill,
+            uninstall_skill,
+            get_tool_skills,
+            get_bundled_skills,
+            add_skill_to_index,
+            remove_skill_from_index,
+            upload_skills_json,
+            get_installed_skills,
+            install_skill_from_market,
+            install_skill_via_npm,
+            // MCP commands
+            get_mcp_servers,
+            get_mcp_server,
+            add_mcp_server,
+            update_mcp_server,
+            delete_mcp_server,
+            get_mcp_server_tools,
+            get_tool_mcp_servers,
+            toggle_mcp_server_tool,
+            sync_mcp_config,
+            read_mcp_config,
+            get_mcp_topology,
+            start_all_mcp,
+            stop_all_mcp,
+            start_mcp_server,
+            stop_mcp_server,
+            // Tool install (TODO: implement)
+            // install_tool,
+            // Usage stats
+            get_usage_stats,
+            get_total_usage,
+            get_daily_usage,
+            // Skill overlay
+            toggle_skill_overlay,
+            log_skill_invoke,
+            get_recent_skill_invokes,
+            get_main_window_rect,
+            // [corrupted fixed]
+            get_usage_alerts,
+            save_usage_alert,
+            delete_usage_alert,
+            get_current_tool_config,
+            // [corrupted fixed]
+            save_config_template,
+            update_config_template,
+            delete_config_template,
+            apply_config_template,
+            // 模型列表
+            fetch_provider_models,
+            fetch_provider_models_with_key,
+            // 鎼存梻鏁ら幒褍鍩?            exit_app,
+            hide_to_tray,
+            bring_window_to_front,
+            has_detected_before,
+            clear_detection_cache,
+            install_npm_package,
+            get_tool_local_version,
+            get_tool_npm_version,
+            upgrade_npm_tool,
+            install_npm_tool,
+            diagnose_tool_conflicts,
+            check_tool_upgrade,
+            uninstall_npm_tool,
+            get_app_version,
+            check_latest_version,
+            download_and_install,
+            // Chat commands
+            get_tool_api_config,
+            get_chat_sessions,
+            create_chat_session,
+            get_chat_messages,
+            send_chat_message,
+            rename_chat_session,
+            delete_chat_session,
+            stream_chat,
+            // Provider model
+            set_provider_model,
+            set_provider_pricing,
+            get_provider_default_model,
+            // [corrupted fixed]
+            clear_all_cache,
+            // Session cache cleanup
+            estimate_cleanable_space,
+            cleanup_sessions_cache,
+            // Memory files
+            get_memory_files,
+            save_memory_file,
+            read_file_base64,
+            capture_screen,
+            delete_memory_file,
+            summarize_memory_file,
+            // App control
+            exit_app,
+            // Skill overlay
+            toggle_skill_overlay,
+            log_skill_invoke,
+            get_recent_skill_invokes,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+
+// ===== Settings =====
+#[tauri::command]
+fn get_setting(key: String, db: tauri::State<'_, Database>) -> Result<Option<String>, String> {
+    db.get_setting(&key)
+}
+#[tauri::command]
+fn set_setting(key: String, value: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.set_setting(&key, &value)
+}
+
+
+// ===== Config Import/Export =====
+#[tauri::command]
+fn export_all_configs(db: tauri::State<'_, Database>) -> Result<String, String> {
+    let json: serde_json::Value = db.export_all()?;
+    serde_json::to_string_pretty(&json).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn import_all_configs(data: serde_json::Value, merge: bool, db: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
+        db.import_all(&data, merge)
+    }));
+    match result {
+        Ok(import_result) => import_result,
+        Err(panic_err) => {
+            let msg = if let Some(s) = panic_err.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = panic_err.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "未知panic".to_string()
+            };
+            Err(format!("导入时panic: {}", msg))
+        }
+    }
+}
+
+// ===== Provider Activation =====
+#[tauri::command]
+fn get_cli_tools(db: tauri::State<'_, Database>) -> Result<Vec<db::CliTool>, String> {
+    db.get_cli_tools()
+}
+#[tauri::command]
+fn get_cli_tools_with_installed(db: tauri::State<'_, Database>) -> Result<Vec<(db::CliTool, bool)>, String> {
+    db.get_cli_tools_with_installed()
+}
+#[tauri::command]
+fn get_active_provider_for_tool(tool_id: String, db: tauri::State<'_, Database>) -> Result<Option<String>, String> {
+    db.get_active_provider_for_tool(&tool_id)
+}
+#[tauri::command]
+fn activate_provider_for_tool(tool_id: String, provider_id: String, db: tauri::State<'_, Database>) -> Result<String, String> {
+    db.activate_provider_for_tool(&tool_id, &provider_id)
+}
+
+// ===== Config Template =====
+#[tauri::command]
+fn save_config_template(name: String, description: String, tool_provider_map: std::collections::HashMap<String, String>, db: tauri::State<'_, Database>) -> Result<db::ConfigTemplate, String> {
+    db.save_config_template(&name, &description, &tool_provider_map)
+}
+#[tauri::command]
+fn update_config_template(id: String, name: String, description: String, tool_provider_map: std::collections::HashMap<String, String>, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.update_config_template(&id, &name, &description, &tool_provider_map)
+}
+#[tauri::command]
+fn delete_config_template(id: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.delete_config_template(&id)
+}
+#[tauri::command]
+fn apply_config_template(id: String, db: tauri::State<'_, Database>) -> Result<String, String> {
+    let templates = db.get_config_templates()?;
+    let _t = templates.into_iter().find(|t| t.id == id).ok_or("template not found")?;
+    Ok("applied".to_string())
+}
+
+// ===== Detection Cache =====
+#[tauri::command]
+fn save_detection_cache(results: Vec<(String, bool)>, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.save_detection_cache(&results)
+}
+#[tauri::command]
+fn load_detection_cache(db: tauri::State<'_, Database>) -> Result<Vec<(String, bool)>, String> {
+    db.load_detection_cache()
+}
+
+// ===== Tool Management =====
+#[tauri::command]
+fn has_detected_before(db: tauri::State<'_, Database>) -> Result<bool, String> {
+    Ok(db.has_detected_before())
+}
+
+#[tauri::command]
+fn clear_detection_cache(db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.clear_detection_cache()
+}
+
+#[tauri::command]
+fn install_npm_package(pkg: String) -> Result<String, String> {
+    use std::process::Command;
+    let output = Command::new("cmd")
+        .args(["/c", &format!("npm install -g {}", pkg)])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|e| format!("执行失败: {}", e))?;
+    if output.status.success() {
+        Ok(format!("{} 安装成功", pkg))
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr);
+        Err(format!("安装失败: {}", err))
+    }
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    opener::open(&url).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn launch_tool(tool_id: String) -> Result<(), String> {
+    config_writer::launch_tool(tool_id)
+}
+#[tauri::command]
+fn detect_installed_tools_cmd() -> Vec<String> {
+    config_writer::detect_installed_tools()
+}
+#[tauri::command]
+fn detect_tools_detail() -> Vec<config_writer::ToolDetectResult> {
+    config_writer::detect_tools_detail()
+}
+
+// ===== Version & Upgrade =====
+#[tauri::command]
+fn get_tool_local_version(tool_id: String) -> Result<String, String> {
+    config_writer::get_local_version(&tool_id)
+}
+#[tauri::command]
+async fn get_tool_npm_version(tool_id: String) -> Result<String, String> {
+    config_writer::get_npm_latest_version(&tool_id).await
+}
+#[tauri::command]
+fn upgrade_npm_tool(tool_id: String) -> Result<String, String> {
+    config_writer::upgrade_tool(&tool_id)
+}
+
+#[tauri::command]
+fn install_npm_tool(tool_id: String, npm_package: String) -> Result<String, String> {
+    config_writer::install_tool(&tool_id, &npm_package)
+}
+#[tauri::command]
+fn uninstall_npm_tool(tool_id: String) -> Result<String, String> {
+    config_writer::uninstall_tool(&tool_id)
+}
+#[tauri::command]
+fn diagnose_tool_conflicts(tool_id: String) -> Result<config_writer::DiagnoseResult, String> {
+    config_writer::diagnose_tool_conflicts(&tool_id)
+}
+#[tauri::command]
+async fn check_tool_upgrade(tool_id: String) -> Result<(String, String, bool), String> {
+    config_writer::check_tool_upgrade(&tool_id).await
+}
+
+#[tauri::command]
+fn get_all_tool_configs() -> Vec<config_writer::ToolConfigEntry> {
+    config_writer::get_all_tool_configs()
+}
+#[tauri::command]
+fn get_current_tool_config(tool_id: String) -> Option<config_writer::CurrentToolConfig> {
+    config_writer::get_current_config(&tool_id)
+}
+
+// ===== Provider 閸涙垝鎶?=====
+
+#[tauri::command]
+fn get_providers(db: tauri::State<'_, Database>) -> Result<Vec<db::Provider>, String> {
+    db.get_providers()
+}
+
+#[tauri::command]
+fn get_provider(id: String, db: tauri::State<'_, Database>) -> Result<Option<db::Provider>, String> {
+    db.get_provider(&id)
+}
+
+#[tauri::command]
+fn add_provider(
+    id: String,
+    name: String,
+    base_url: String,
+    icon: String,
+    category: String,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.add_provider(id, name, base_url, icon, category)
+}
+
+#[tauri::command]
+fn delete_provider(id: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.delete_provider(&id)
+}
+
+#[tauri::command]
+fn set_provider_api_key(
+    provider_id: String,
+    api_key: String,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.set_provider_api_key(&provider_id, &api_key)
+}
+
+#[tauri::command]
+fn set_provider_model(
+    provider_id: String,
+    model_name: String,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.set_provider_model(&provider_id, &model_name)
+}
+
+#[tauri::command]
+fn set_provider_pricing(
+    provider_id: String,
+    input_price: Option<f64>,
+    output_price: Option<f64>,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.set_provider_pricing(&provider_id, input_price, output_price)
+}
+
+#[tauri::command]
+fn get_provider_default_model(
+    provider_id: String,
+    db: tauri::State<'_, Database>,
+) -> Result<Option<String>, String> {
+    Ok(db.get_provider_default_model(&provider_id))
+}
+
+/// 从 Provider 的 /v1/models 端点获取模型列表
+#[tauri::command]
+async fn fetch_provider_models(
+    provider_id: String,
+    db: tauri::State<'_, Database>,
+) -> Result<Vec<String>, String> {
+    let provider = db.get_provider_by_id(&provider_id)?;
+    let base_url = provider.base_url.trim_end_matches('/');
+    let url = format!("{}/models", base_url);
+    
+    let api_key = provider.api_key.ok_or("该 Provider 未配置 API Key")?;
+    
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+    
+    if !resp.status().is_success() {
+        let err_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("API 返回错误: {}", err_text));
+    }
+    
+    #[derive(serde::Deserialize)]
+    struct ModelsResponse {
+        data: Vec<ModelInfo>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ModelInfo {
+        id: String,
+    }
+    
+    let models: ModelsResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析失败: {}", e))?;
+    
+    Ok(models.data.into_iter().map(|m| m.id).collect())
+}
+
+/// 从 Provider 的 /v1/models 端点获取模型列表（直接传入 API Key，不依赖数据库）
+#[tauri::command]
+async fn fetch_provider_models_with_key(
+    provider_id: String,
+    api_key: String,
+    db: tauri::State<'_, Database>,
+) -> Result<Vec<String>, String> {
+    let provider = db.get_provider_by_id(&provider_id)?;
+    let base_url = provider.base_url.trim_end_matches('/');
+    let url = format!("{}/models", base_url);
+    
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+    
+    if !resp.status().is_success() {
+        let err_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("API 返回错误: {}", err_text));
+    }
+    
+    #[derive(serde::Deserialize)]
+    struct ModelsResponse {
+        data: Vec<ModelInfo>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ModelInfo {
+        id: String,
+    }
+    
+    let models: ModelsResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析失败: {}", e))?;
+    
+    Ok(models.data.into_iter().map(|m| m.id).collect())
+}
+
+/// WordPress page HTML parsing and version detection
+#[tauri::command]
+async fn test_api_key(
+    provider_id: String,
+    api_key: String,
+    db: tauri::State<'_, Database>,
+) -> Result<String, String> {
+    use reqwest::header;
+    Ok("stub".to_string())
+}
+
+#[tauri::command]
+fn get_usage_stats(db: tauri::State<'_, Database>) -> Vec<ToolUsage> {
+    // 从 token_usage_log 表聚合各工具用量
+    let tool_ids = ["claude-code","claude-desktop","codex","gemini-cli","opencode","openclaw","hermes-agent","qoder-cli","deepseek-cli"];
+    let mut result = Vec::new();
+    for tid in &tool_ids {
+        let (input, output, total) = db.get_token_usage_by_tool(tid).unwrap_or((0,0,0));
+        result.push(ToolUsage {
+            tool_id: tid.to_string(),
+            tool_name: tid.to_string(),
+            supported: total > 0,
+            total_sessions: 0,
+            total_input_tokens: input as u64,
+            total_output_tokens: output as u64,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
+            daily: vec![],
+        });
+    }
+    result
+}
+
+#[tauri::command]
+fn get_total_usage(db: tauri::State<'_, Database>) -> usage::TotalUsage {
+    let tool_ids = ["claude-code","claude-desktop","codex","gemini-cli","opencode","openclaw","hermes-agent","qoder-cli","deepseek-cli"];
+    let mut total_input = 0u64;
+    let mut total_output = 0u64;
+    let mut count = 0u64;
+    
+    for tid in &tool_ids {
+        let (input, output, total) = db.get_token_usage_by_tool(tid).unwrap_or((0,0,0));
+        if total > 0 {
+            total_input += input as u64;
+            total_output += output as u64;
+            count += 1;
+        }
+    }
+    
+    usage::TotalUsage {
+        total_input_tokens: total_input,
+        total_output_tokens: total_output,
+        tool_count: count,
+    }
+}
+
+#[tauri::command]
+fn get_daily_usage(db: tauri::State<'_, Database>, tool_id: String, days: Option<u64>) -> Result<Vec<Vec<serde_json::Value>>, String> {
+    let keep_days = days.unwrap_or(7);
+    let rows = db.get_daily_token_usage(&tool_id, keep_days)?;
+    // Return as array of [date, input_tokens, output_tokens]
+    Ok(rows.into_iter().map(|(date, inp, out)| {
+        vec![
+            serde_json::Value::String(date),
+            serde_json::Value::Number(serde_json::Number::from(inp)),
+            serde_json::Value::Number(serde_json::Number::from(out)),
+        ]
+    }).collect())
+}
+
+#[tauri::command]
+fn toggle_skill_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    
+    if let Some(window) = app.get_webview_window("skill-overlay") {
+        let visible = window.is_visible().map_err(|e| e.to_string())?;
+        if visible {
+            window.hide().map_err(|e| e.to_string())?;
+        } else {
+            window.show().map_err(|e| e.to_string())?;
+            window.set_focus().map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    
+    // 创建新窗口
+    let _window = tauri::webview::WebviewWindowBuilder::new(
+        &app,
+        "skill-overlay",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .initialization_script("window.__IS_SKILL_OVERLAY__ = true;")
+    .title("技能调用")
+    .inner_size(300.0, 500.0)
+    .min_inner_size(240.0, 300.0)
+    .decorations(false)
+    .always_on_top(true)
+    .resizable(true)
+    .skip_taskbar(true)
+    .background_color(tauri::webview::Color(18, 18, 30, 255))
+    .build()
+    .map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn log_skill_invoke(app: tauri::AppHandle, db: tauri::State<'_, Database>, tool_id: String, skill_slug: String, skill_name: String) -> Result<i64, String> {
+    let id = db.log_skill_invoke(&tool_id, &skill_slug, &skill_name)
+        .map_err(|e| format!("DB insert failed: {}", e))?;
+    let created_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let payload = serde_json::json!({
+        "id": id,
+        "tool_id": tool_id.clone(),
+        "skill_slug": skill_slug,
+        "skill_name": skill_name,
+        "created_at": created_at,
+    });
+    let _ = app.emit("skill-invoked", payload);
+    // 弹出技能调用记录浮窗（独立子窗口，可拖出软件边界）
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        show_or_create_overlay(&app_clone).await;
+    });
+    Ok(id)
+}
+
+fn overlay_debug(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("overlay_debug.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
+async fn show_or_create_overlay(app: &tauri::AppHandle) {
+    let overlay_w = 200.0; // 调整宽度为200px
+
+    // 获取主窗口位置和尺寸
+    let (main_x, main_y, main_w, main_h) = if let Some(main_win) = app.get_webview_window("main") {
+        if let (Ok(op), Ok(os), Ok(ip), Ok(is)) = (main_win.outer_position(), main_win.outer_size(), main_win.inner_position(), main_win.inner_size()) {
+            overlay_debug(&format!("OUTER pos=({},{}) size={}x{}  INNER pos=({},{}) size={}x{}", op.x, op.y, os.width, os.height, ip.x, ip.y, is.width, is.height));
+            (op.x as f64, op.y as f64, os.width as f64, os.height as f64)
+        } else { 
+            overlay_debug("failed to get main window pos/size");
+            (100.0, 100.0, 1100.0, 720.0) 
+        }
+    } else { 
+        overlay_debug("main window not found");
+        (100.0, 100.0, 1100.0, 720.0) 
+    };
+
+    // 计算浮窗位置：主窗口右侧，上下各缩进 5px，左移 1px 覆盖主窗口右边框消除 frameless 透明缝隙
+    let overlay_x = main_x + main_w - 16.0;
+    let overlay_y = main_y;
+    let overlay_h = main_h - 8.0;
+
+    eprintln!("[overlay] target pos=({}, {}) size=({}x{})", overlay_x, overlay_y, overlay_w, overlay_h);
+
+    overlay_debug(&format!("TARGET x={} y={} w={} h={}", overlay_x, overlay_y, overlay_w, overlay_h));
+
+    // 已有浮窗 → 更新位置和大小后显示
+    if let Some(win) = app.get_webview_window("skill-overlay") {
+        let _ = win.set_position(tauri::PhysicalPosition::new(overlay_x as i32, overlay_y as i32));
+        let _ = win.set_size(tauri::PhysicalSize::new((overlay_w - 16.0) as u32, overlay_h as u32));
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+
+    // 创建新窗口
+    let url = tauri::WebviewUrl::App("index.html?window=skill-overlay".into());
+    let _overlay_win = match tauri::webview::WebviewWindowBuilder::new(app, "skill-overlay", url)
+        .title("技能调用")
+        .inner_size(184.0, 700.0)
+        .min_inner_size(180.0, 200.0)
+        .decorations(false)
+        .resizable(false)
+        .skip_taskbar(true)
+        .transparent(false)
+        .background_color(tauri::webview::Color(18, 18, 30, 255))
+        .build()
+    {
+        Ok(w) => {
+            // 用 physical 坐标设置位置和大小，与 on_window_event / 已有分支完全一致（避免 logical/physical 混用导致 DPI 缩放错位）
+            let _ = w.set_position(tauri::PhysicalPosition::new(overlay_x as i32, overlay_y as i32));
+            let _ = w.set_size(tauri::PhysicalSize::new((overlay_w - 16.0) as u32, overlay_h as u32));
+            if let (Ok(ap), Ok(asz)) = (w.outer_position(), w.outer_size()) {
+                overlay_debug(&format!("ACTUAL overlay pos=({},{}) size={}x{}", ap.x, ap.y, asz.width, asz.height));
+            }
+            w
+        },
+        Err(e) => { 
+            eprintln!("[skill-overlay] build error: {}", e); 
+            return; 
+        }
+    };
+}
+
+#[tauri::command]
+fn get_recent_skill_invokes(db: tauri::State<'_, Database>, limit: Option<u32>) -> Result<Vec<serde_json::Value>, String> {
+    let rows = db.get_recent_skill_invokes(limit.unwrap_or(50))?;
+    Ok(rows.into_iter().map(|(id, tool_id, slug, name, ts)| {
+        serde_json::json!({
+            "id": id,
+            "tool_id": tool_id,
+            "skill_slug": slug,
+            "skill_name": name,
+            "created_at": ts,
+        })
+    }).collect())
+}
+
+#[tauri::command]
+fn get_main_window_rect(app: tauri::AppHandle) -> Option<serde_json::Value> {
+    app.get_webview_window("main").and_then(|w| {
+        let pos = w.outer_position().ok()?;
+        let size = w.outer_size().ok()?;
+        let x = pos.x as f64;
+        let y = pos.y as f64;
+        let width = size.width as f64;
+        let height = size.height as f64;
+        eprintln!("[get_main_window_rect] x={} y={} w={} h={}", x, y, width, height);
+        Some(serde_json::json!({
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height
+        }))
+    })
+}
+
+// [corrupted fixed]
+
+#[tauri::command]
+fn get_usage_alerts(db: tauri::State<'_, Database>) -> Result<Vec<db::UsageAlert>, String> {
+    // UsageAlert is in db module, accessible as db::UsageAlert
+    db.get_usage_alerts()
+}
+
+#[tauri::command]
+fn save_usage_alert(
+    tool_id: String,
+    threshold_percent: i32,
+    monthly_limit_tokens: i64,
+    enabled: bool,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.save_usage_alert(&tool_id, threshold_percent, monthly_limit_tokens, enabled)
+}
+
+#[tauri::command]
+fn delete_usage_alert(tool_id: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.delete_usage_alert(&tool_id)
+}
+
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    eprintln!("[exit_app] invoked, calling app.exit(0)");
+    app.exit(0);
+}
+
+/// WordPress page HTML parsing and version detection
+#[tauri::command]
+fn hide_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| e.to_string())
+    } else {
+        Err("缁愭褰涢張顏呭閸?".to_string())
+    }
+}
+
+/// 鐏忓棛鐛ラ崣锝囩枂妞?
+#[tauri::command]
+fn bring_window_to_front(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        // [corrupted fixed]
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        window.set_always_on_top(false).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("缁愭褰涢張顏呭閸?".to_string())
+    }
+}
+
+// ===== MCP 缁狅紕鎮婇崨鎴掓姢 =====
+
+#[tauri::command]
+fn get_mcp_servers(db: tauri::State<'_, Database>) -> Result<Vec<McpServer>, String> {
+    db.get_mcp_servers()
+}
+
+#[tauri::command]
+fn get_mcp_server(id: String, db: tauri::State<'_, Database>) -> Result<Option<McpServer>, String> {
+    db.get_mcp_server(&id)
+}
+
+#[tauri::command]
+fn add_mcp_server(
+    id: String,
+    name: String,
+    transport: String,
+    command: Option<String>,
+    args: Option<String>,
+    url: Option<String>,
+    env: Option<String>,
+    headers: Option<String>,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.add_mcp_server(id, name, transport, command, args, url, env, headers)
+}
+
+#[tauri::command]
+fn update_mcp_server(
+    id: String,
+    name: String,
+    transport: String,
+    command: Option<String>,
+    args: Option<String>,
+    url: Option<String>,
+    env: Option<String>,
+    headers: Option<String>,
+    enabled: bool,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.update_mcp_server(&id, name, transport, command, args, url, env, headers, enabled)
+}
+
+#[tauri::command]
+fn delete_mcp_server(id: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.delete_mcp_server(&id)
+}
+
+#[tauri::command]
+fn get_mcp_server_tools(
+    mcp_server_id: String,
+    db: tauri::State<'_, Database>,
+) -> Result<Vec<mcp::McpServerTool>, String> {
+    db.get_mcp_server_tools(&mcp_server_id)
+}
+
+#[tauri::command]
+fn get_tool_mcp_servers(
+    tool_id: String,
+    db: tauri::State<'_, Database>,
+) -> Result<Vec<McpServer>, String> {
+    db.get_tool_mcp_servers(&tool_id)
+}
+
+#[tauri::command]
+fn toggle_mcp_server_tool(
+    mcp_server_id: String,
+    tool_id: String,
+    enabled: bool,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    db.toggle_mcp_server_tool(&mcp_server_id, &tool_id, enabled)
+}
+
+/// 閸氬本顒?MCP 闁板秶鐤嗛崚鏉夸紣閸忕兘鍘ょ純顔芥瀮娴?
+#[tauri::command]
+fn sync_mcp_config(
+    tool_id: String,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    let servers = db.get_tool_mcp_servers(&tool_id)?;
+    write_mcp_config_for_tool(&tool_id, &servers)
+}
+
+/// 閼惧嘲褰?MCP 閹锋挻澧ら弫鐗堝祦閿涘湯erver 閳?Tool 鏉╃偞甯撮崗宕囬兇閸欘垵顫嬮崠鏍电礆
+#[tauri::command]
+fn get_mcp_topology(db: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    db.get_mcp_topology()
+}
+
+/// WordPress page HTML parsing and version detection
+#[tauri::command]
+fn read_mcp_config(tool_id: String) -> Result<serde_json::Value, String> {
+    read_mcp_config_for_tool(&tool_id)
+}
+
+/// 一键启动所有 MCP 服务器(真正启动进程)
+#[tauri::command]
+async fn start_all_mcp(db: tauri::State<'_, Database>) -> Result<String, String> {
+    use process::{start_all_enabled, stop_all_running};
+
+    // 先清理旧的运行记录
+    let existing = db.get_mcp_servers().unwrap_or_default();
+    if existing.iter().any(|s| s.running || s.pid.is_some()) {
+        let _ = stop_all_running(existing).await;
+    }
+
+    // npx 可用性检测（直接 node 跑 npx-cli.js，绕过 npx.cmd 的 cmd 8.0 解析 bug）
+    use process::find_npx_cli_js;
+    if let Err(e) = find_npx_cli_js() {
+        return Err(format!("❌ npx 不可用 ({})", e));
+    }
+
+    let servers = db.get_mcp_servers().unwrap_or_default();
+    let (success, failed) = start_all_enabled(servers.clone()).await;
+
+    // 更新数据库中的 PID
+    for s in &servers {
+        if s.enabled {
+            if let Some(pid) = process::MCP_PIDS.get(&s.id) {
+                db.set_mcp_process(&s.id, *pid as i64, true).ok();
+            }
+        }
+    }
+
+    if success.is_empty() && failed.is_empty() {
+        return Ok("📭 暂无启用的 MCP 服务器".to_string());
+    }
+    let mut msg = vec![];
+    if !success.is_empty() { msg.push(format!("✅ 启动: {}", success.join(", "))); }
+    if !failed.is_empty() { msg.push(format!("❌ 失败: {}", failed.join(", "))); }
+    Ok(msg.join("\n"))
+}
+
+/// 启动单个 MCP 服务器
+#[tauri::command]
+async fn start_mcp_server(id: String, db: tauri::State<'_, Database>) -> Result<String, String> {
+    use process::start_mcp_process;
+
+    let servers = db.get_mcp_servers().unwrap_or_default();
+    let server = servers.iter().find(|s| s.id == id)
+        .ok_or_else(|| format!("MCP 服务器 {} 不存在", id))?;
+
+    if server.transport != "stdio" {
+        return Err("仅支持 stdio 类型的 MCP 服务器".to_string());
+    }
+
+    let command = server.command.as_ref().ok_or("缺少命令")?;
+    let args_str = &server.args;
+    let args: Vec<String> = match args_str {
+        Some(s) if !s.is_empty() => {
+            serde_json::from_str::<Vec<String>>(s).unwrap_or_default()
+        }
+        _ => vec![],
+    };
+
+    let pid = start_mcp_process(&server.id, command, &args).await
+        .map_err(|e| format!("启动失败: {}", e))?;
+
+    db.set_mcp_process(&server.id, pid as i64, true).ok();
+
+    Ok(format!("✅ {} 已启动 (PID {})", server.name, pid))
+}
+
+/// 停止单个 MCP 服务器
+#[tauri::command]
+async fn stop_mcp_server(id: String, db: tauri::State<'_, Database>) -> Result<String, String> {
+    use process::{kill_pid, MCP_PIDS};
+
+    // 1. 先查 in-memory MCP_PIDS；查不到再回退到 DB（处理 app 重启 / npx wrapper 退出等场景）
+    let pid: u32 = match MCP_PIDS.get(&id).map(|p| *p) {
+        Some(p) => p,
+        None => match db.get_mcp_server(&id) {
+            Ok(Some(s)) if s.running => match s.pid {
+                Some(p) => p,
+                None => return Err("进程未运行或 PID 未记录".to_string()),
+            },
+            _ => return Err("进程未运行或 PID 未记录".to_string()),
+        },
+    };
+
+    // 2. taskkill 失败（npx wrapper 已退出 / 进程本来就不在了）也视为成功，清理状态
+    let killed = kill_pid(pid).await;
+    MCP_PIDS.remove(&id);
+    db.set_mcp_process(&id, 0, false).ok();
+
+    if killed {
+        Ok(format!("✅ 已停止 (PID {})", pid))
+    } else {
+        Ok(format!("✅ 已停止 (PID {} 已退出)", pid))
+    }
+}
+
+/// 一键停止所有 MCP 服务器(真正杀掉进程)
+#[tauri::command]
+async fn stop_all_mcp(db: tauri::State<'_, Database>) -> Result<String, String> {
+    use process::stop_all_running;
+
+    let servers = db.get_mcp_servers().unwrap_or_default();
+    let stopped = stop_all_running(servers).await;
+
+    // 清除所有 PID 记录
+    db.set_all_mcp_enabled(false).ok();
+    let all_servers = db.get_mcp_servers().unwrap_or_default();
+    for s in all_servers {
+        db.clear_mcp_process(&s.id).ok();
+    }
+
+    if stopped.is_empty() {
+        return Ok("📭 没有正在运行的 MCP 服务器".to_string());
+    }
+    Ok(format!("⏹ 已停止: {}", stopped.join(", ")))
+}
+
+// ===== 聊天功能 =====
+
+#[tauri::command]
+fn get_tool_api_config(tool_id: String, db: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let _ = std::panic::catch_unwind(|| {
+        eprintln!("[DEBUG] get_tool_api_config called with tool_id='{}'", tool_id);
+    });
+    db.get_tool_api_config(&tool_id)
+}
+
+#[tauri::command]
+fn get_chat_sessions(tool_id: String, db: tauri::State<'_, Database>) -> Result<Vec<db::ChatSession>, String> {
+    db.get_chat_sessions(&tool_id)
+}
+
+#[tauri::command]
+fn create_chat_session(tool_id: String, db: tauri::State<'_, Database>) -> Result<db::ChatSession, String> {
+    db.create_chat_session(&tool_id)
+}
+
+#[tauri::command]
+fn get_chat_messages(session_id: String, db: tauri::State<'_, Database>) -> Result<Vec<db::ChatMessage>, String> {
+    db.get_chat_messages(&session_id)
+}
+
+#[tauri::command]
+fn send_chat_message(session_id: String, role: String, content: String, db: tauri::State<'_, Database>) -> Result<db::ChatMessage, String> {
+    db.send_chat_message(&session_id, &role, &content)
+}
+
+#[tauri::command]
+fn rename_chat_session(session_id: String, title: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.rename_chat_session(&session_id, &title)
+}
+
+#[tauri::command]
+fn delete_chat_session(session_id: String, db: tauri::State<'_, Database>) -> Result<(), String> {
+    db.delete_chat_session(&session_id)
+}
+
+/// 閼惧嘲褰囨惔鏃傛暏閻楀牊婀伴崣？
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// WordPress page HTML parsing and version detection
+#[tauri::command]
+async fn check_latest_version() -> Result<serde_json::Value, String> {
+    use reqwest;
+    let resp = reqwest::get("https://agent.eake.cn/codexhub-cn/").await
+        .map_err(|e| e.to_string())?;
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+
+    // 从产品页提取版本号和下载链接，支持空格/下划线/连字符/%20(URL编码)分隔
+    // 关键:必须能匹配 `CodexHub%20CN_0.0.6_x64-setup.exe` 这种 URL 编码格式
+    let version_re = regex::Regex::new(r"CodexHub[%_\s-]+CN[%_\s-]+v?([0-9]+\.[0-9]+(?:\.[0-9]+)?)").unwrap();
+    // 备用正则:匹配页面上 `v0.0.6` 这种显式版本号(hero-badge 里有)
+    let v_re = regex::Regex::new(r"\bv([0-9]+\.[0-9]+\.[0-9]+)\b").unwrap();
+    let full_url_re = regex::Regex::new(r#"https?://[^ "'<> ]+\.(?:exe|msi|zip)"#).unwrap();
+    let rel_path_re = regex::Regex::new(r#"(wp-content/downloads/[^"'<>\\s]+\\.(?:exe|msi|zip))"#).unwrap();
+
+
+    // ── BUG-A FIX: 规范化版本号(去掉 v/V  前缀)──
+    // 优先匹配文件名(CodexHub%20CN_0.0.6_...),备用匹配页面里的 v0.0.6 文字
+    let latest_version = version_re.captures(&body)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+        .or_else(|| v_re.captures(&body).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()))
+        .unwrap_or_default();
+
+    let mut download_url = full_url_re.captures(&body)
+        .map(|c| c.get(0).unwrap().as_str().to_string())
+        .unwrap_or_default();
+
+    // check download_url is empty
+    if download_url.is_empty() {
+        if let Some(m) = rel_path_re.captures(&body) {
+            download_url = format!("https://agent.eake.cn/{}", &m[1]);
+        }
+    }
+
+    // fallback_url
+    let fallback_url = if download_url.is_empty() && !latest_version.is_empty() {
+            // 使用带空格的文件名（需要 URL 编码）
+            format!("https://agent.eake.cn/wp-content/downloads/CodexHub%20CN_{}_x64-setup.exe", latest_version)
+    } else {
+        String::new()
+    };
+
+    // URL encode spaces in download_url
+    if !download_url.is_empty() {
+        download_url = urlencoding::encode(&download_url).into_owned();
+    }
+
+    Ok(serde_json::json!({
+        "version": latest_version,
+        "download_url": if download_url.is_empty() { fallback_url } else { download_url }
+    }))
+}
+
+/// WordPress page HTML parsing and version detection
+/// Downloads and installs a new version of the app.
+#[tauri::command]
+async fn download_and_install(window: tauri::Window, url: String) -> Result<String, String> {
+    use std::process::Command;
+    use futures_util::StreamExt;
+
+    if url.is_empty() {
+        return Err("Download URL is empty".to_string());
+    }
+
+    // 写入到当前 exe 同目录（Defender 通常信任此位置）
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("无法获取当前程序路径: {}", e))?;
+    let exe_dir = current_exe.parent()
+        .ok_or("无法获取程序目录")?
+        .to_path_buf();
+    // 使用时间戳唯一文件名
+    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+    let tmp = exe_dir.join(format!("CodexHub_CN_update_{}.exe", timestamp));
+    println!("[update] Downloading to: {}", tmp.display());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Emit start
+    let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": 0, "status": "starting"}));
+
+    let resp = client.get(&url).send().await.map_err(|e| {
+        let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": e.to_string()}));
+        e.to_string()
+    })?;
+
+    let total_size = resp.content_length().unwrap_or(0);
+    println!("[update] Total size: {} bytes", total_size);
+
+    // 先下载到内存，再一次写入文件（避免流式写入时的文件损坏）
+    println!("[update] Downloading to memory...");
+    let mut downloaded: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    let mut data = Vec::new();
+    if total_size > 0 {
+        data.reserve(total_size as usize);
+    }
+
+    // Emit progress: 0%
+    let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": 0, "downloaded": 0, "total": total_size}));
+
+    while let Some(item) = stream.next().await {
+        let chunk = match item {
+            Ok(c) => c,
+            Err(e) => {
+                let err_msg = format!("下载中断: {} (已下载 {} bytes)", e, downloaded);
+                let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": &err_msg}));
+                return Err(err_msg);
+            }
+        };
+        downloaded += chunk.len() as u64;
+        data.extend_from_slice(&chunk);
+
+        if total_size > 0 {
+            let pct = (downloaded as f64 / total_size as f64 * 100.0) as u32;
+            let _ = window.emit("codexhub_download_progress", serde_json::json!({
+                "progress": pct,
+                "downloaded": downloaded,
+                "total": total_size
+            }));
+        }
+    }
+
+    println!("[update] Downloaded {} bytes to memory, now writing to file...", data.len());
+
+    // 一次写入文件
+    if let Err(e) = std::fs::write(&tmp, &data) {
+        let err_msg = format!("写入文件失败: {} (路径: {})", e, tmp.display());
+        let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": &err_msg}));
+        return Err(err_msg);
+    }
+    println!("[update] Download complete: {} bytes", downloaded);
+
+    // 验证文件大小
+    if total_size > 0 && downloaded != total_size {
+        let err_msg = format!("下载不完整: 期望 {} bytes, 实际 {} bytes", total_size, downloaded);
+        let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": &err_msg}));
+        return Err(err_msg);
+    }
+    // 验证文件是否存在且可读
+    match std::fs::metadata(&tmp) {
+        Ok(meta) => {
+            if meta.len() != downloaded {
+                let err_msg = format!("文件大小不匹配: 期望 {} bytes, 文件系统显示 {} bytes", downloaded, meta.len());
+                let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": &err_msg}));
+                return Err(err_msg);
+            }
+            println!("[update] File verified: {} bytes on disk", meta.len());
+        }
+        Err(e) => {
+            let err_msg = format!("无法读取下载文件: {}", e);
+            let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": &err_msg}));
+            return Err(err_msg);
+        }
+    }
+
+    // Emit completion
+    let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": 100, "status": "installing"}));
+
+    // 启动安装程序 - 尝试直接启动，如果失败则提示用户手动安装
+    println!("[update] Starting installer: {}", tmp.display());
+    let ext = tmp.extension().and_then(|e| e.to_str()).unwrap_or("");
+    // 尝试用 PowerShell 先解除文件锁定（如果 Defender 已标记）
+    println!("[update] Attempting to unblock file...");
+    let unblock_result = Command::new("powershell")
+        .args(["-Command", &format!("Unblock-File -Path '{}' -ErrorAction SilentlyContinue", tmp.display())])
+        .output();
+    if let Ok(output) = unblock_result {
+        println!("[update] Unblock output: {}", String::from_utf8_lossy(&output.stdout));
+    }
+    
+    let result = if ext == "msi" {
+        Command::new("msiexec")
+            .args(["/i", tmp.to_str().unwrap(), "/quiet", "/qn"])
+            .spawn()
+    } else {
+        // 尝试直接启动
+        Command::new(&tmp)
+            .spawn()
+    };
+    
+    match result {
+        Ok(child) => {
+            println!("[update] Installer started successfully");
+            let _ = child;
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            println!("[update] Failed to start installer: {}", err_str);
+            // 如果是因为 Defender 锁定，提供手动安装选项
+            if err_str.contains("1392") || err_str.contains("corrupted") {
+                let manual_msg = format!(
+                    "自动安装被 Windows Defender 阻止。请手动运行: {}",
+                    tmp.display()
+                );
+                let _ = window.emit("codexhub_download_progress", serde_json::json!({
+                    "progress": 100, 
+                    "status": "manual_required",
+                    "message": &manual_msg,
+                    "path": tmp.to_str().unwrap()
+                }));
+                // 打开文件所在目录
+                let _ = Command::new("explorer.exe")
+                    .args(["/select,", tmp.to_str().unwrap()])
+                    .spawn();
+                return Ok(format!("下载完成。请手动运行: {}", tmp.display()));
+            }
+            let err_msg = format!("启动安装程序失败: {}", err_str);
+            let _ = window.emit("codexhub_download_progress", serde_json::json!({"progress": -1, "error": &err_msg}));
+            return Err(err_msg);
+        }
+    }
+    // _child 故意不 .wait(),让安装包在后台跑
+
+    println!("[update] Installer started, waiting 5s for installation to complete...");
+
+    // 在子线程中:等5秒(给安装包足够时间完成)→ 启动新实例 → 等2秒确认 → 退出当前进程
+    let exe_path = std::env::current_exe().unwrap();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        match std::process::Command::new(&exe_path).spawn() {
+            Ok(_) => {
+                println!("[update] New instance spawned successfully, exiting old in 2s...");
+            }
+            Err(e) => {
+                println!("[update] Failed to spawn new instance: {}, trying again in 3s...", e);
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                let _ = std::process::Command::new(&exe_path).spawn();
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::process::exit(0);
+    });
+
+    Ok("Download complete. CodexHub will restart shortly.".to_string())
+
+}
+
+#[tauri::command]
+fn clear_all_cache(app: tauri::AppHandle) -> Result<(), String> {
+    let db = app.state::<Database>();
+    db.clear_all_cache()
+}
+
+/// 流式聊天 - 通过 OpenClaw Gateway 调用 LLM API
+#[tauri::command]
+async fn stream_chat(
+    window: tauri::Window,
+    session_id: String,
+    tool_id: String,
+    new_message: String,
+    db: tauri::State<'_, Database>,
+) -> Result<(), String> {
+    use reqwest::Client;
+    use futures_util::StreamExt;
+    use tauri::Emitter;
+
+    // 获取 API 配置
+    let config = db.get_tool_api_config(&tool_id)?;
+    let api_key = config["api_key"].as_str().ok_or("missing api_key")?.to_string();
+    let base_url = config["base_url"].as_str().ok_or("missing base_url")?.to_string();
+    let model = config["model"].as_str().ok_or("missing model")?.to_string();
+
+    // 保存用户消息
+    db.send_chat_message(&session_id, "user", &new_message)?;
+
+    // 获取历史消息
+    let messages = db.get_chat_messages(&session_id)?;
+    let mut chat_history: Vec<serde_json::Value> = messages.iter().map(|m| {
+        serde_json::json!({
+            "role": m.role,
+            "content": m.content
+        })
+    }).collect();
+
+    // 构建请求
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "model": model,
+        "messages": chat_history,
+        "stream": true,
+        "stream_options": {"include_usage": true}
+    });
+
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let mut req = client.post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&body);
+
+    let resp = req.send().await.map_err(|e| {
+        let _ = window.emit("chat_error", serde_json::json!({"error": e.to_string()}));
+        format!("请求 API 失败: {}", e)
+    })?;
+
+    if !resp.status().is_success() {
+        let err_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let _ = window.emit("chat_error", serde_json::json!({"error": err_text.clone()}));
+        return Err(format!("API 返回错误: {}", err_text));
+    }
+
+    // 流式读取响应
+    let mut stream = resp.bytes_stream();
+    let mut assistant_content = String::new();
+    let mut buffer = String::new();
+    let mut usage_input: i64 = 0;
+    let mut usage_output: i64 = 0;
+    let mut usage_total: i64 = 0;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| {
+            let _ = window.emit("chat_error", serde_json::json!({"error": e.to_string()}));
+            format!("读取流失败: {}", e)
+        })?;
+
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        buffer.push_str(&chunk_str);
+
+        // 解析 SSE 格式
+        while let Some(pos) = buffer.find("\n\n") {
+            let line = buffer[..pos].to_string();
+            buffer = buffer[pos + 2..].to_string();
+
+            if line.starts_with("data: ") {
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    break;
+                }
+
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(delta) = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")).and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                        assistant_content.push_str(delta);
+                        let _ = window.emit("chat_token", serde_json::json!({"content": assistant_content.clone()}));
+                    }
+                    // 解析 usage（通常在最后一个 chunk）
+                    if let Some(u) = json.get("usage") {
+                        usage_input = u.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(usage_input);
+                        usage_output = u.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(usage_output);
+                        usage_total = u.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(usage_total);
+                    }
+                }
+            }
+        }
+    }
+
+    // 保存助手回复
+    db.send_chat_message(&session_id, "assistant", &assistant_content)?;
+
+    // 记录 Token 用量
+    if usage_total > 0 {
+        let _ = db.log_token_usage(&tool_id, &session_id, &model, usage_input, usage_output, usage_total);
+    }
+
+    // 发送完成事件
+    let _ = window.emit("chat_done", serde_json::json!({"content": assistant_content}));
+
+    Ok(())
+}
+
+// ===== Memory Files =====
+
+/// 记忆文件信息
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct MemoryFile {
+    name: String,
+    path: String,
+    content: String,
+    modified: String,
+    size: usize,
+}
+
+/// 各工具的记忆文件路径映射
+fn memory_files_for_tool(tool_id: &str) -> Option<Vec<(String, String)>> {
+    let home = dirs::home_dir()?;
+    match tool_id {
+        "claude-code" => Some(vec![
+            ("CLAUDE.md".into(), home.join("CLAUDE.md").to_string_lossy().into()),
+            ("MEMORY.md".into(), home.join(".claude").join("MEMORY.md").to_string_lossy().into()),
+        ]),
+        "openclaw" => Some(vec![
+            ("AGENTS.md".into(), home.join(".openclaw").join("AGENTS.md").to_string_lossy().into()),
+            ("SOUL.md".into(), home.join(".openclaw").join("SOUL.md").to_string_lossy().into()),
+            ("MEMORY.md".into(), home.join(".openclaw").join("MEMORY.md").to_string_lossy().into()),
+            ("USER.md".into(), home.join(".openclaw").join("USER.md").to_string_lossy().into()),
+            ("TOOLS.md".into(), home.join(".openclaw").join("TOOLS.md").to_string_lossy().into()),
+        ]),
+        "hermes-agent" => Some(vec![
+            ("AGENTS.md".into(), home.join(".hermes").join("AGENTS.md").to_string_lossy().into()),
+            ("SOUL.md".into(), home.join(".hermes").join("SOUL.md").to_string_lossy().into()),
+            ("MEMORY.md".into(), home.join(".hermes").join("MEMORY.md").to_string_lossy().into()),
+            ("USER.md".into(), home.join(".hermes").join("USER.md").to_string_lossy().into()),
+        ]),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+fn get_memory_files(tool_id: String) -> Result<Vec<MemoryFile>, String> {
+    let files = memory_files_for_tool(&tool_id)
+        .ok_or_else(|| format!("工具 {} 不支持记忆文件", tool_id))?;
+
+    let mut result = Vec::new();
+    for (name, path) in files {
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        let metadata = std::fs::metadata(&path).ok();
+        let modified = metadata
+            .and_then(|m| m.modified().ok())
+            .map(|t| {
+                let datetime: chrono::DateTime<chrono::Local> = t.into();
+                datetime.format("%Y-%m-%d %H:%M").to_string()
+            })
+            .unwrap_or_else(|| "-".into());
+        let size = content.len();
+        result.push(MemoryFile {
+            name,
+            path,
+            content,
+            modified,
+            size,
+        });
+    }
+    Ok(result)
+}
+
+/// 读取本地文件并返回 base64 编码（用于 Tauri WebView 中 File API 受限时的替代方案）
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    Ok(base64_encode(&bytes))
+}
+
+/// 标准库手写 base64 编码（避免引入额外依赖）
+fn base64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARS[((n >> 18) & 63) as usize] as char);
+        out.push(CHARS[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(CHARS[((n >> 6) & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(CHARS[(n & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+/// 截取主屏幕并返回 data URL（供前端插入到聊天输入预览区）
+#[tauri::command]
+fn capture_screen(app: tauri::AppHandle) -> Result<String, String> {
+    use screenshots::Screen;
+
+    // 1) 隐藏主窗口，避免截到自己（深色窗口缩略图）
+    let main_window = app.get_webview_window("main");
+    if let Some(ref w) = main_window {
+        let _ = w.hide();
+    }
+
+    // RAII guard：函数任何路径 return 都会恢复窗口
+    struct WindowGuard(Option<tauri::WebviewWindow>);
+    impl Drop for WindowGuard {
+        fn drop(&mut self) {
+            if let Some(ref w) = self.0 {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+    }
+    let _guard = WindowGuard(main_window);
+
+    // 2) 等屏幕重新绘制（OS 异步合成，最少 300ms）
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
+    // 3) 截屏
+    let screens = Screen::all().map_err(|e| format!("获取屏幕列表失败: {}", e))?;
+    if screens.is_empty() {
+        return Err("未检测到可用屏幕".to_string());
+    }
+    let img = screens[0]
+        .capture()
+        .map_err(|e| format!("截屏失败: {}", e))?;
+
+    // 4) 编码 PNG → base64
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("codexhub_capture_{}.png", secs));
+    image::DynamicImage::ImageRgba8(img)
+        .save(&tmp)
+        .map_err(|e| format!("保存截屏失败: {}", e))?;
+    let bytes = std::fs::read(&tmp).map_err(|e| format!("读取截屏失败: {}", e))?;
+    let _ = std::fs::remove_file(&tmp);
+    Ok(format!("data:image/png;base64,{}", base64_encode(&bytes)))
+}
+
+#[tauri::command]
+fn save_memory_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, &content)
+        .map_err(|e| format!("保存失败: {}", e))
+}
+
+#[tauri::command]
+fn delete_memory_file(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    // 二次保险：限制只能删除 .md / CLAUDE.md / MEMORY.md 等记忆文件
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !name.ends_with(".md") {
+        return Err(format!("仅允许删除 .md 记忆文件，拒绝删除: {}", name));
+    }
+    std::fs::remove_file(p)
+        .map_err(|e| format!("删除失败: {}", e))
+}
+
+#[tauri::command]
+async fn summarize_memory_file(file_content: String, tool_id: String, db: tauri::State<'_, Database>) -> Result<String, String> {
+    // 获取 API 配置
+    let config = db.get_tool_api_config(&tool_id)?;
+    let api_key = config["api_key"].as_str().ok_or("missing api_key")?.to_string();
+    let base_url = config["base_url"].as_str().ok_or("missing base_url")?.to_string();
+    let model = config["model"].as_str().ok_or("missing model")?.to_string();
+
+    let prompt = format!("你是一个专业的记忆文件分析助手。请分析以下记忆文件的内容，提取关键信息并按结构化方式重写。\n\n要求：\n1. 提取所有事实性信息（用户身份、偏好、技术栈、项目背景等）\n2. 按类别整理（如：身份信息、技术偏好、项目信息、行为准则）\n3. 删除过期或重复内容\n4. 保持简洁、清晰\n5. 如果内容已有良好结构，只补充缺失的关键信息\n\n记忆文件内容：\n```\n{}\n```", file_content);
+
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "stream": false
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let resp = client.post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("请求 API 失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let err_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("API 返回错误: {}", err_text));
+    }
+
+    let result: serde_json::Value = resp.json().await
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    let content = result["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or("API 返回格式异常")?
+        .to_string();
+
+    Ok(content)
+}
+

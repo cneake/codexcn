@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- OpenClaw 官方 logo：红色小怪兽（圆胖身体+小眼+小手脚） -->
+  <!-- 透明背景，角色本身 -->
+  <!-- 主体（圆胖的红色身体） -->
+  <ellipse cx="12" cy="13" rx="7" ry="7.5" fill="#E94545"/>
+  <!-- 顶部两个小触角/耳朵 -->
+  <ellipse cx="9" cy="5" rx="0.8" ry="1.5" fill="#E94545"/>
+  <ellipse cx="15" cy="5" rx="0.8" ry="1.5" fill="#E94545"/>
+  <!-- 眼睛（白色眼白+黑色眼珠） -->
+  <circle cx="9.5" cy="11" r="1.6" fill="#FFFFFF"/>
+  <circle cx="14.5" cy="11" r="1.6" fill="#FFFFFF"/>
+  <circle cx="9.5" cy="11" r="0.7" fill="#1a1a1a"/>
+  <circle cx="14.5" cy="11" r="0.7" fill="#1a1a1a"/>
+  <!-- 嘴巴（小小弧形） -->
+  <path d="M 10.5 14.5 Q 12 15.5 13.5 14.5" fill="none" stroke="#1a1a1a" stroke-width="0.5" stroke-linecap="round"/>
+  <!-- 左手 -->
+  <ellipse cx="5" cy="14" rx="1.2" ry="1.5" fill="#E94545"/>
+  <!-- 右手 -->
+  <ellipse cx="19" cy="14" rx="1.2" ry="1.5" fill="#E94545"/>
+  <!-- 左脚 -->
+  <ellipse cx="9" cy="20" rx="1.5" ry="1" fill="#E94545"/>
+  <!-- 右脚 -->
+  <ellipse cx="15" cy="20" rx="1.5" ry="1" fill="#E94545"/>
+</svg>

@@ -1,0 +1,11 @@
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\powerfmt-ec8d8f8ebf468ded.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\buf.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\ext.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display_impls.rs
+
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\libpowerfmt-ec8d8f8ebf468ded.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\buf.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\ext.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display_impls.rs
+
+D:/codexhubcn/cc-switch-clone/src-tauri/target-release-new\release\deps\libpowerfmt-ec8d8f8ebf468ded.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\buf.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\ext.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display_impls.rs
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\buf.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\ext.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\powerfmt-0.2.0\src\smart_display_impls.rs:

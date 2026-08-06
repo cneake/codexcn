@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Claude Code 官方 logo：橙色圆角方块 + 白色 12 角星爆 -->
+  <!-- 背景：Anthropic 橙色 #D97757，圆角 -->
+  <rect width="24" height="24" rx="5" fill="#D97757"/>
+  <!-- 白色星爆：12 条放射线 -->
+  <g fill="#FFFFFF" transform="translate(12 12)">
+    <!-- 12 条长度一致的放射线，每条 30° -->
+    <g>
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(30)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(60)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(90)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(120)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(150)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(180)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(210)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(240)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(270)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(300)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+    <g transform="rotate(330)">
+      <rect x="-0.6" y="-9" width="1.2" height="6" rx="0.6"/>
+    </g>
+  </g>
+  <!-- 中心圆点 -->
+  <circle cx="12" cy="12" r="1.5" fill="#FFFFFF"/>
+</svg>

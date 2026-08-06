@@ -1,0 +1,11 @@
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\foldhash-5e8f7aa2259e19b9.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\fast.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\quality.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\seed.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\convenience.rs
+
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\libfoldhash-5e8f7aa2259e19b9.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\fast.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\quality.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\seed.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\convenience.rs
+
+D:\codexhubcn\cc-switch-clone\src-tauri\target-check\debug\deps\libfoldhash-5e8f7aa2259e19b9.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\fast.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\quality.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\seed.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\convenience.rs
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\fast.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\quality.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\seed.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\foldhash-0.2.0\src\convenience.rs:
